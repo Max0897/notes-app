@@ -1,0 +1,40 @@
+{
+  "name": "notes-app",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host localhost",
+    "start": "tsx server/index.ts",
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc -b",
+    "test:api": "node tests/api.test.mjs",
+    "lint": "oxlint",
+    "preview": "vite preview --host localhost"
+  },
+  "dependencies": {
+    "@arco-design/web-react": "^2.66.18",
+    "@hono/node-server": "^2.1.5",
+    "@node-rs/argon2": "^2.2.2",
+    "@tiptap/extension-task-item": "^2.27.3",
+    "@tiptap/extension-task-list": "^2.27.3",
+    "@tiptap/react": "^2.27.3",
+    "@tiptap/starter-kit": "^2.27.3",
+    "better-sqlite3": "^13.0.3",
+    "hono": "^4.13.13",
+    "lucide-react": "^1.57.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.6.5",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^4.7.0",
+    "oxlint": "^1.81.0",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9.3",
+    "vite": "^6.4.4"
+  }
+}
