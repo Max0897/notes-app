@@ -1,7 +1,9 @@
 import {displayName} from './api';
+import {useMobileHints} from './hints';
 import type {MentionMember, MentionRange} from './commentMentions';
 
 export function CommentText({body, mentions, mentionRanges = [], members}: {body: string; mentions: string[]; mentionRanges?: MentionRange[]; members: MentionMember[]}) {
+  const mobile = useMobileHints();
   let ranges = mentionRanges;
   if (!ranges.length) {
     // Older comments contain only plain text and member IDs.
@@ -22,7 +24,7 @@ export function CommentText({body, mentions, mentionRanges = [], members}: {body
   for (const range of ranges) {
     if (range.from < from || range.to > body.length || body.slice(range.from, range.to) !== '@' + range.label) continue;
     content.push(body.slice(from, range.from));
-    content.push(<span key={range.from} className="comment-mention" data-user-id={range.userId} title={'@' + range.label}>@{range.label}</span>);
+    content.push(<span key={range.from} className="comment-mention" data-user-id={range.userId} title={mobile ? undefined : '@' + range.label}>@{range.label}</span>);
     from = range.to;
   }
   content.push(body.slice(from));

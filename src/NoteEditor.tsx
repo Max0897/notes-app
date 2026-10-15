@@ -10,6 +10,7 @@ import type {User} from './api';
 import {EditorTools} from './EditorTools';
 import {EditorContextMenu} from './EditorContextMenu';
 import {SaveStatus} from './SaveStatus';
+import {useHintTitle} from './hints';
 import {DraftStore, noteDraft, type Draft} from './drafts';
 const TeamNoteEditor=lazy(()=>import('./TeamNoteEditor').then(module=>({default:module.TeamNoteEditor})));
 const {Text,Paragraph}=Typography;
@@ -49,6 +50,7 @@ useEffect(()=>()=>clearTimeout(timer.current),[]);
 useEffect(()=>{editor?.setEditable(!note.deletedAt&&!readOnly&&!recovery);if(dirty.current&&note.version>latest.current.version&&!conflictRef.current)setStatus('其他成员已更新，保存时将检查冲突');if(!dirty.current&&!pending.current){latest.current=note;titleRef.current=note.title;setTitle(note.title);if(editor&&canon(editor.getJSON())!==canon(note.content))editor.commands.setContent(note.content,false);savedContent.current=canon(note.content);}},[note,editor,readOnly,recovery]);
 useEffect(()=>{const warn=(e:BeforeUnloadEvent)=>{if(dirty.current){e.preventDefault();e.returnValue='';}};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn);},[]);
 const collaborationText=teamId?[note.modifiedBy&&'最后修改：'+note.modifiedBy,activeEditors.length>0&&activeEditors.join('、')+' 正在编辑'].filter(Boolean).join(' · '):'';
+const collaborationTitle=useHintTitle(collaborationText);
 return <>
 {recovery&&<div className="recovery-banner"><Text>发现本地未保存草稿 · {new Date(recovery.updatedAt).toLocaleString('zh-CN')}</Text><Space wrap size={4}>
   <Button size="mini" disabled={readOnly||!!note.deletedAt} onClick={()=>{
@@ -67,7 +69,7 @@ return <>
 <div className="format-bar">
   <EditorTools editor={editor} disabled={!!note.deletedAt||readOnly||!!recovery}/>
   <div className="editor-save-info">
-    {teamId&&<div className="editor-collaboration-info">{collaborationText&&<Text type="secondary" title={collaborationText}>{collaborationText}</Text>}{note.canEdit===false&&<Tag size="small">只读</Tag>}</div>}
+    {teamId&&<div className="editor-collaboration-info">{collaborationText&&<Text type="secondary" title={collaborationTitle}>{collaborationText}</Text>}{note.canEdit===false&&<Tag size="small">只读</Tag>}</div>}
     <SaveStatus status={status} saved={status==='已保存'} onSave={flush}/>
   </div>
 </div>

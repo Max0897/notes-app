@@ -600,7 +600,7 @@ app.post('/api/auth/logout-others', requireAuth, async c => {
   return c.json({ ok: true, revokedSessions: result.changes });
 });
 
-registerCollaboration(app, db, {readBody, requireAuth, requireLiveSession, verifyCurrentPassword, validateContent, folderName, ApiError});
+registerCollaboration(app, db, {readBody, requireAuth, requireLiveSession, verifyCurrentPassword, validateContent, folderName, ApiError, dataDir});
 registerNotifications(app, db, {readBody, requireAuth, requireLiveSession, ApiError});
 registerNotebook(app, db, {readBody, requireAuth, requireLiveSession, validateContent, ApiError, restore: realtime.restore});
 

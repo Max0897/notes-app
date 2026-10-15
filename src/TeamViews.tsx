@@ -1,6 +1,6 @@
 import {useEffect, useRef, useState} from 'react';
 import {Alert, Button, Empty, Input, Message, Modal, Select, Space, Spin, Tabs, Tag, Typography} from '@arco-design/web-react';
-import {Copy, RotateCcw} from 'lucide-react';
+import {Copy, Link2, RefreshCw, RotateCcw, Unlink} from 'lucide-react';
 import {api, teamApi, isManager, roleNames, type Team, type TeamRole, type Folder, type User} from './api';
 import {UserAvatar} from './UserAvatar';
 import {WorkspacePage} from './WorkspacePage';
@@ -10,6 +10,7 @@ const errorMessage = (error: unknown) => Message.error((error as Error).message)
 const date = (value: string | number) => new Date(value).toLocaleString('zh-CN');
 type Member = User & {role: TeamRole; joinedAt: string};
 type Invitation = {id: string; teamId: string; teamName: string; inviter: string; username?: string; role: TeamRole; status: string; isLink: boolean; expiresAt: number};
+type InvitationLink = Invitation & {token?: string};
 const statusNames: Record<string, string> = {pending: '待接受', accepted: '已接受', rejected: '已拒绝', revoked: '已撤销', expired: '已过期'};
 function useTask() {
   const [busy, setBusy] = useState(false); const lock = useRef(false);
@@ -69,7 +70,8 @@ export function InvitationsPage({teams, token, onMenu, onLinkHandled, onChanged}
 export function TeamSettingsPage({team, user, onMenu, onChanged, onLeave}: {team: Team; user: User; onMenu: () => void; onChanged: () => Promise<void>; onLeave: () => Promise<void>}) {
   const [name, setName] = useState(team.name), [description, setDescription] = useState(team.description);
   const [members, setMembers] = useState<Member[]>([]), [memberSearch, setMemberSearch] = useState(''), [invites, setInvites] = useState<Invitation[]>([]);
-  const [inviteUsername, setInviteUsername] = useState(''), [inviteRole, setInviteRole] = useState<TeamRole>('viewer'), [inviteLink, setInviteLink] = useState('');
+  const [inviteUsername, setInviteUsername] = useState(''), [inviteRole, setInviteRole] = useState<TeamRole>('viewer');
+  const [inviteLink, setInviteLink] = useState<InvitationLink | null>(null), [linkRole, setLinkRole] = useState<TeamRole>('viewer');
   const [folders, setFolders] = useState<Folder[]>([]), [folderId, setFolderId] = useState(''), [mode, setMode] = useState('team'), [grants, setGrants] = useState<Record<string, string>>({}), [affected, setAffected] = useState(0);
   const [activityNext, setActivityNext] = useState<number | null>(null);
   const [activities, setActivities] = useState<{id: number; username: string; action: string; objectName: string; nickname?: string; createdAt: string}[]>([]);
@@ -78,7 +80,7 @@ export function TeamSettingsPage({team, user, onMenu, onChanged, onLeave}: {team
   async function refresh() {
     const [people, folderData] = await Promise.all([teamApi(team.id, '/members'), teamApi(team.id, '/folders')]);
     setMembers(people.members); setFolders(folderData.folders);
-    if (manage) { const [invitations, log] = await Promise.all([teamApi(team.id, '/invitations'), teamApi(team.id, '/activity')]); setInvites(invitations.invitations); setActivities(log.activities); setActivityNext(log.next); }
+    if (manage) { const [invitations, log, link] = await Promise.all([teamApi(team.id, '/invitations'), teamApi(team.id, '/activity'), teamApi(team.id, '/invitation-link')]); setInvites(invitations.invitations); setActivities(log.activities); setActivityNext(log.next); setInviteLink(link.link); setLinkRole(link.link?.role ?? 'viewer'); }
   }
   useEffect(() => { void refresh().catch(errorMessage).finally(() => setLoading(false)); }, [team.id, manage]);
   useEffect(() => {
@@ -88,8 +90,11 @@ export function TeamSettingsPage({team, user, onMenu, onChanged, onLeave}: {team
     return () => { active = false; };
   }, [folderId, team.id, manage]);
   async function changed() { await refresh(); await onChanged(); }
-  async function invite(link: boolean) {
-    await run(async () => { const data = await teamApi(team.id, '/invitations', 'POST', {role: inviteRole, ...(!link ? {username: inviteUsername} : {})}); if (data.token) setInviteLink(linkFor(data.token)); else { setInviteUsername(''); Message.success('站内邀请已发出'); } await refresh(); });
+  async function invite() {
+    await run(async () => { await teamApi(team.id, '/invitations', 'POST', {role: inviteRole, username: inviteUsername}); setInviteUsername(''); Message.success('站内邀请已发出'); await refresh(); });
+  }
+  async function generateLink() {
+    return run(async () => { await teamApi(team.id, '/invitation-link', 'PUT', {role: linkRole}); await refresh(); Message.success(inviteLink ? '邀请链接已重新生成，旧链接已失效' : '邀请链接已生成'); });
   }
   function changeMember(member: Member, role: TeamRole) {
     Modal.confirm({title: `将 ${member.username} 调整为${roleNames[role]}？`, content: '角色变化会立即影响其可用操作。', onOk: async () => { if (!await run(async () => { await teamApi(team.id, '/members/' + member.id, 'PATCH', {role}); await changed(); })) throw new Error('更新失败'); }});
@@ -117,17 +122,36 @@ export function TeamSettingsPage({team, user, onMenu, onChanged, onLeave}: {team
           </div>)}
         </Tabs.TabPane>
         {manage && <Tabs.TabPane key="invites" title="邀请">
-          <div className="account-form"><Select aria-label="邀请加入角色" value={inviteRole} onChange={setInviteRole} disabled={busy}><Select.Option value="viewer">查看者</Select.Option><Select.Option value="editor">编辑者</Select.Option></Select>
+          <div className="account-form invitation-link-form">
+            <Text bold>邀请链接</Text>
+            <Text type="secondary">你的链接可供多人加入，7 天有效。关闭后停止加入，重新生成后旧链接立即失效。</Text>
+            <div className="invitation-controls">
+              <Select aria-label="链接加入角色" value={linkRole} onChange={setLinkRole} disabled={busy}><Select.Option value="viewer">查看者</Select.Option><Select.Option value="editor">编辑者</Select.Option></Select>
+              <Button type={inviteLink ? 'default' : 'primary'} icon={inviteLink ? <RefreshCw size={14}/> : <Link2 size={14}/>} disabled={busy} onClick={() => {
+                if (!inviteLink) { void generateLink(); return; }
+                Modal.confirm({title: '重新生成邀请链接？', content: '旧链接会立即失效，新链接使用所选加入角色。已加入的成员不受影响。', onOk: async () => { if (!await generateLink()) throw new Error('生成失败'); }});
+              }}>{inviteLink ? '重新生成' : '生成链接'}</Button>
+            </div>
+            {inviteLink && <Text type="secondary">{inviteLink.status === 'pending' ? `${roleNames[inviteLink.role]} · 已开启 · ${date(inviteLink.expiresAt)}到期` : inviteLink.status === 'expired' ? '已过期' : '已关闭'}</Text>}
+            {inviteLink?.token && <Input aria-label="邀请链接" value={linkFor(inviteLink.token)} readOnly/>}
+            {inviteLink?.status === 'pending' && !inviteLink.token && <Text type="secondary">请重新生成以更新旧版邀请链接。</Text>}
+            {(inviteLink?.token || inviteLink?.status === 'pending') && <Space wrap className="invitation-link-actions">
+              {inviteLink?.token && <Button icon={<Copy size={14}/>} disabled={busy} onClick={() => void copy(linkFor(inviteLink.token!))}>复制链接</Button>}
+              {inviteLink?.status === 'pending' && <Button icon={<Unlink size={14}/>} disabled={busy} onClick={() => void run(async () => { await teamApi(team.id, '/invitation-link', 'DELETE'); await refresh(); Message.success('邀请链接已关闭'); })}>关闭链接</Button>}
+            </Space>}
+          </div>
+          <div className="account-form"><Text bold>站内邀请</Text>
             <Input aria-label="邀请用户名" placeholder="输入对方完整用户名" value={inviteUsername} onChange={setInviteUsername} disabled={busy}/>
-            <Space wrap><Button type="primary" disabled={busy || !inviteUsername.trim()} onClick={() => void invite(false)}>发送站内邀请</Button><Button disabled={busy} onClick={() => void invite(true)}>生成单次邀请链接</Button></Space>
-            <Text type="secondary">邀请 7 天有效，接收者确认后加入；链接只能使用一次。</Text>
-            {inviteLink && <><Input aria-label="邀请链接" value={inviteLink} readOnly/><Button icon={<Copy size={14}/>} onClick={() => void copy(inviteLink)}>复制邀请链接</Button></>}
+            <div className="invitation-controls"><Select aria-label="邀请加入角色" value={inviteRole} onChange={setInviteRole} disabled={busy}><Select.Option value="viewer">查看者</Select.Option><Select.Option value="editor">编辑者</Select.Option></Select>
+              <Button type="primary" disabled={busy || !inviteUsername.trim()} onClick={() => void invite()}>发送站内邀请</Button>
+            </div>
+            <Text type="secondary">邀请 7 天有效，接收者确认后加入。</Text>
           </div>
           {!invites.length && <Empty description="尚未发送邀请"/>}
           {invites.map(inv => <ListRow key={inv.id} className="team-entry" actions={inv.status !== 'accepted' && <>
-            <Button size="small" disabled={busy} onClick={() => void run(async () => { const data = await teamApi(team.id, '/invitations/' + inv.id + '/resend', 'POST'); if (data.token) setInviteLink(linkFor(data.token)); await refresh(); Message.success('已重新邀请，旧链接已失效'); })}>重新邀请</Button>
+            <Button size="small" disabled={busy} onClick={() => void run(async () => { await teamApi(team.id, '/invitations/' + inv.id + '/resend', 'POST'); await refresh(); Message.success('已重新邀请'); })}>重新邀请</Button>
             {inv.status === 'pending' && <Button size="small" disabled={busy} onClick={() => void run(async () => { await teamApi(team.id, '/invitations/' + inv.id, 'DELETE'); await refresh(); Message.success('邀请已撤销'); })}>撤销</Button>}
-          </>}><Text bold>{inv.isLink ? '邀请链接' : inv.username}</Text><Text type="secondary">{roleNames[inv.role]} · {statusNames[inv.status]} · {date(inv.expiresAt)}到期</Text></ListRow>)}
+          </>}><Text bold>{inv.username}</Text><Text type="secondary">{roleNames[inv.role]} · {statusNames[inv.status]} · {date(inv.expiresAt)}到期</Text></ListRow>)}
         </Tabs.TabPane>}
         {manage && <Tabs.TabPane key="access" title="文件夹权限">
           <Alert content="所有者和管理员始终可访问全部团队资料；其他成员的权限不超过其团队角色。"/>

@@ -11,6 +11,7 @@ import {EditorLink, openEditorLink} from './editorLinks';
 import {EditorTools} from './EditorTools';
 import {EditorContextMenu} from './EditorContextMenu';
 import {SaveStatus} from './SaveStatus';
+import {useHintTitle} from './hints';
 import {UserAvatar} from './UserAvatar';
 import {CollaborationSession, type CollaborationState} from './collaboration';
 import type {EditorBridge, Note, User} from './api';
@@ -40,6 +41,7 @@ export const TeamNoteEditor = forwardRef<EditorBridge, Props>(function TeamNoteE
 });
 
 const CollaborativeEditor = forwardRef<EditorBridge, Props & {session: CollaborationSession; state: CollaborationState}>(function CollaborativeEditor({note, onSave, readOnly, session, state, onComment}, bridge) {
+  const modifiedTitle = useHintTitle('最后修改：' + (state.note?.modifiedBy ?? note.modifiedBy ?? '团队成员'));
   const latest = useRef(note), onSaveRef = useRef(onSave);
   useEffect(() => { onSaveRef.current = onSave; }, [onSave]);
   const titleText = session.document.getText('title');
@@ -138,7 +140,7 @@ const CollaborativeEditor = forwardRef<EditorBridge, Props & {session: Collabora
     {(state.recovered || state.draftError) && <div className="recovery-banner"><Text type={state.draftError ? 'warning' : 'secondary'}>{state.draftError ? '此设备暂时无法保存恢复草稿，请在服务器显示已保存后再关闭页面。' : state.saved ? '本地草稿已恢复并同步' : '已恢复本地草稿，正在合并同步…'}</Text></div>}
     <div className="format-bar collaboration-format-bar"><EditorTools editor={editor} disabled={!editable}/>
       <div className="editor-save-info">
-        <div className="editor-collaboration-info"><Text type="secondary" title={'最后修改：' + (state.note?.modifiedBy ?? note.modifiedBy ?? '团队成员')}>最后修改：{state.note?.modifiedBy ?? note.modifiedBy ?? '团队成员'}</Text></div>
+        <div className="editor-collaboration-info"><Text type="secondary" title={modifiedTitle}>最后修改：{state.note?.modifiedBy ?? note.modifiedBy ?? '团队成员'}</Text></div>
         <div className="collaborator-avatars" aria-label={`当前在线 ${members.length} 人`}>
           {members.slice(0, 4).map(member => <Tooltip key={member.id} trigger={['hover', 'focus', 'click']} content={`${member.name}${member.id === state.me.id ? '（你）' : ''} · ${member.editing ? '正在编辑' : '正在查看'}`}>
             <span className="collaborator-avatar" style={{borderColor: member.color}} tabIndex={0} aria-label={`${member.name} · ${member.editing ? '正在编辑' : '正在查看'}`}><UserAvatar user={member} size={24}/></span>

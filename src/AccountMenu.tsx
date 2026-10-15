@@ -3,11 +3,13 @@ import {Trigger} from '@arco-design/web-react';
 import {ChevronRight, LogOut, Settings} from 'lucide-react';
 import type {User} from './api';
 import {UserAvatar} from './UserAvatar';
+import {useHintTitle} from './hints';
 
 export function AccountMenu({user, disabled, onSettings, onLogout}: {
   user: User; disabled: boolean; onSettings: () => void; onLogout: () => void;
 }) {
   const username = user.nickname || user.username;
+  const usernameTitle = useHintTitle(username);
   const [visible, setVisible] = useState(false);
   const [compact, setCompact] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -46,7 +48,7 @@ export function AccountMenu({user, disabled, onSettings, onLogout}: {
     popup={() => <div className="account-menu" id={menuId} role="menu" aria-label="账号菜单" ref={menuRef} onKeyDown={menuKeys}>
       <div className="account-menu-profile" role="presentation">
         <UserAvatar user={user} size={48}/>
-        <strong title={username}>{username}</strong>
+        <strong title={usernameTitle}>{username}</strong>
       </div>
       <div className="account-menu-actions" role="presentation">
         <button type="button" role="menuitem" onClick={() => { setVisible(false); onSettings(); }}><Settings size={18}/><span>账号设置</span></button>
@@ -66,7 +68,7 @@ export function AccountMenu({user, disabled, onSettings, onLogout}: {
         } else if (event.key === 'Escape' && visible) { event.preventDefault(); event.stopPropagation(); close(); }
       }}>
       <UserAvatar user={user}/>
-      <span className="user-name" title={username}>{username}</span><ChevronRight className="user-arrow" size={18}/>
+      <span className="user-name" title={usernameTitle}>{username}</span><ChevronRight className="user-arrow" size={18}/>
     </button>
   </Trigger>;
 }

@@ -52,7 +52,32 @@ export const EditorLink = Link.extend({
         init: (_, state) => plainTextLinks(state.doc),
         apply: (transaction, previous) => transaction.docChanged ? plainTextLinks(transaction.doc) : previous,
       },
-      props: {decorations(state) { return this.getState(state); }},
+      props: {
+        decorations(state) { return this.getState(state); },
+        handleDOMEvents: {
+          auxclick: (_view, event) => {
+            if (event.target instanceof Element && event.target.closest('a[href]')) { event.preventDefault(); return true; }
+            return false;
+          },
+        },
+      },
+      view(view) {
+        const doc = view.dom.ownerDocument, win = doc.defaultView!;
+        let alt = false;
+        const render = () => view.dom.classList.toggle('editor-alt-links', alt);
+        const key = (event: KeyboardEvent) => { alt = event.altKey || (event.type === 'keydown' && event.key === 'Alt'); render(); };
+        const mouse = (event: MouseEvent) => { alt = event.altKey; render(); };
+        const reset = () => { alt = false; render(); };
+        const visibility = () => { if (doc.hidden) reset(); };
+        doc.addEventListener('keydown', key, true); doc.addEventListener('keyup', key, true);
+        doc.addEventListener('mousemove', mouse, true); doc.addEventListener('mousedown', mouse, true);
+        doc.addEventListener('visibilitychange', visibility); win.addEventListener('blur', reset);
+        return {update: render, destroy() {
+          doc.removeEventListener('keydown', key, true); doc.removeEventListener('keyup', key, true);
+          doc.removeEventListener('mousemove', mouse, true); doc.removeEventListener('mousedown', mouse, true);
+          doc.removeEventListener('visibilitychange', visibility); win.removeEventListener('blur', reset); reset();
+        }};
+      },
     })];
   },
   addAttributes() {
@@ -67,7 +92,8 @@ export const EditorLink = Link.extend({
       }},
       target: {...attributes.target, parseHTML: () => '_blank'},
       rel: {...attributes.rel, parseHTML: () => 'noopener noreferrer nofollow'},
-      title: {default: null, parseHTML: (element: HTMLElement) => element.getAttribute('title')?.slice(0, 200) ?? null},
+      // 标题保留在正文数据中，不生成浏览器原生 tooltip。
+      title: {default: null, parseHTML: (element: HTMLElement) => element.getAttribute('title')?.slice(0, 200) ?? null, renderHTML: () => ({})},
     };
   },
 }).configure({
@@ -85,6 +111,7 @@ export function openEditorLink(event: MouseEvent): boolean {
   const anchor = event.target.closest('a[href]');
   if (!(anchor instanceof HTMLAnchorElement)) return false;
   event.preventDefault();
+  if (!event.altKey) return false;
   const href = anchor.getAttribute('href');
   if (href && allowedLink(href)) window.open(anchor.href, '_blank', 'noopener,noreferrer');
   return true;

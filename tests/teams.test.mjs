@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
-import {mkdtemp, rm} from 'node:fs/promises';
+import {copyFile, mkdtemp, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {resolve} from 'node:path';
 import {once} from 'node:events';
@@ -109,7 +109,7 @@ test('团队空间与角色：个人隔离、角色上限、移除后即刻失�
   assert.equal((await r(owner, '/spaces')).teams[0].id, team.id);
 });
 
-test('邀请与所有者保护：指定账号、显式确认、令牌哈希、撤销、过期、单次并发和已移除的转让接口', {timeout: 60000}, async t => {
+test('邀请与所有者保护：指定账号、显式确认、令牌哈希、撤销、过期、多人并发和已移除的转让接口', {timeout: 60000}, async t => {
   const {r, owner, editor, viewer, outsider, base, dataDir, team, cleanups, register} = await setup(t);
   const db = new Database(resolve(dataDir, 'notes.sqlite')); cleanups.push(() => db.close());
   const inv = await r(owner, base + '/invitations', 'POST', {username: outsider.json.user.username}, 201);
@@ -127,15 +127,16 @@ test('邀请与所有者保护：指定账号、显式确认、令牌哈希、�
   await r(outsider, '/invitations/link/' + link.token, 'GET', undefined, 404);
   db.prepare('UPDATE team_invitations SET expires_at=? WHERE id=?').run(Date.now() - 1, link.id);
   await r(outsider, '/invitations/link/' + replaced.token, 'GET', undefined, 404);
-  const single = await r(owner, base + '/invitations', 'POST', {role: 'editor'}, 201);
-  assert.equal((await r(outsider, '/invitations/link/' + single.token)).invitation.role, 'editor');
-  await r(viewer, '/invitations/' + single.id + '/respond', 'POST', {accept: true, token: single.token}, 409);
+  const shared = await r(owner, base + '/invitations', 'POST', {role: 'editor'}, 201);
+  assert.equal(shared.id, link.id);
+  assert.equal((await r(outsider, '/invitations/link/' + shared.token)).invitation.role, 'editor');
+  await r(viewer, '/invitations/' + shared.id + '/respond', 'POST', {accept: true, token: shared.token});
+  assert.equal((await r(owner, base + '/members')).members.find(m => m.id === viewer.json.user.id).role, 'viewer');
   const secondOutsider = await register('team-second-outsider');
-  const outcomes = await Promise.all([outsider, secondOutsider].map(w => r(w, '/invitations/' + single.id + '/respond', 'POST', {accept: true, token: single.token}, null)));
-  assert.equal(outcomes.filter(v => v.ok).length, 1);
-  const acceptedBy = db.prepare('SELECT accepted_by FROM team_invitations WHERE id=?').get(single.id).accepted_by;
-  const winner = acceptedBy === outsider.json.user.id ? outsider : secondOutsider;
-  await r(winner, '/invitations/' + single.id + '/respond', 'POST', {accept: true, token: single.token});
+  const outcomes = await Promise.all([outsider, secondOutsider].map(w => r(w, '/invitations/' + shared.id + '/respond', 'POST', {accept: true, token: shared.token})));
+  assert.equal(outcomes.filter(v => v.ok).length, 2);
+  assert.deepEqual(db.prepare('SELECT status,accepted_by FROM team_invitations WHERE id=?').get(shared.id), {status: 'pending', accepted_by: null});
+  await r(outsider, '/invitations/' + shared.id + '/respond', 'POST', {accept: true, token: shared.token});
   await r(owner, base + '/transfer', 'POST', {memberId: editor.json.user.id}, 404);
   await r(owner, base + '/transfer', 'DELETE', undefined, 404);
   await r(editor, base + '/transfer/respond', 'POST', {accept: true}, 404);
@@ -151,7 +152,7 @@ test('邀请与所有者保护：指定账号、显式确认、令牌哈希、�
   assert.equal(members.filter(m => m.role === 'owner').length, 1);
   assert.equal(members.find(m => m.id === owner.json.user.id).role, 'owner');
   assert.equal(members.find(m => m.id === editor.json.user.id).role, 'editor');
-  const logs = await r(owner, base + '/activity'); assert.ok(!JSON.stringify(logs).includes(single.token));
+  const logs = await r(owner, base + '/activity'); assert.ok(!JSON.stringify(logs).includes(shared.token));
   assert.equal(db.prepare('SELECT COUNT(*) n FROM spaces WHERE team_id=?').get(team.id).n, 1);
   // 通过另一条邀请加入再退出，也不能使用尚未处理的旧站内邀请重新加入。
   const late = await register('team-late-member');
@@ -160,6 +161,74 @@ test('邀请与所有者保护：指定账号、显式确认、令牌哈希、�
   await r(late, '/invitations/' + another.id + '/respond', 'POST', {accept: true, token: another.token});
   await r(owner, base + '/members/' + late.json.user.id, 'DELETE');
   await r(late, '/invitations/' + oldTarget.id + '/respond', 'POST', {accept: true}, 409);
+});
+
+test('每人一个邀请链接：重复复制、关闭、重新生成、权限隔离及旧数据升级持久化', {timeout: 60000}, async t => {
+  const {r, owner, editor, viewer, outsider, base, dataDir, cleanups} = await setup(t);
+  const db = new Database(resolve(dataDir, 'notes.sqlite')); cleanups.push(() => db.close());
+  assert.equal((await r(owner, base + '/invitation-link')).link, null);
+  for (const who of [editor, viewer]) {
+    await r(who, base + '/invitation-link', 'GET', undefined, 403);
+    await r(who, base + '/invitation-link', 'PUT', {}, 403);
+    await r(who, base + '/invitation-link', 'DELETE', undefined, 403);
+  }
+  const first = (await r(owner, base + '/invitation-link', 'PUT', {role: 'viewer'})).link;
+  assert.match(first.token, /^[A-Za-z0-9_-]{43}$/);
+  const countLogs = () => db.prepare('SELECT COUNT(*) n FROM activity_logs WHERE team_id=?').get(first.teamId).n;
+  const logCount = countLogs();
+  assert.equal((await r(owner, base + '/invitation-link')).link.token, first.token);
+  const copies = await Promise.all([1, 2, 3].map(() => r(owner, base + '/invitations', 'POST', {role: 'viewer'}, 201)));
+  assert.ok(copies.every(link => link.id === first.id && link.token === first.token));
+  assert.equal(countLogs(), logCount, '读取或重复获取链接不记录生成事件');
+  assert.ok((await r(owner, base + '/invitations')).invitations.every(inv => !inv.isLink));
+  await r(owner, base + '/invitation-link', 'DELETE');
+  await r(owner, base + '/invitation-link', 'DELETE');
+  assert.equal((await r(owner, base + '/invitation-link')).link.status, 'revoked');
+  assert.equal((await r(owner, base + '/invitation-link')).link.token, undefined);
+  await r(outsider, '/invitations/link/' + first.token, 'GET', undefined, 404);
+  await r(outsider, '/invitations/' + first.id + '/respond', 'POST', {accept: true, token: first.token}, 409);
+  const second = (await r(owner, base + '/invitation-link', 'PUT', {role: 'editor'})).link;
+  assert.equal(second.id, first.id); assert.notEqual(second.token, first.token);
+  assert.equal(second.role, 'editor');
+  await r(outsider, '/invitations/' + second.id + '/respond', 'POST', {accept: true, token: first.token}, 404);
+  const third = (await r(owner, base + '/invitation-link', 'PUT', {role: 'viewer'})).link;
+  assert.equal(third.id, first.id); assert.notEqual(third.token, second.token);
+  await r(outsider, '/invitations/link/' + second.token, 'GET', undefined, 404);
+  await r(outsider, '/invitations/' + third.id + '/respond', 'POST', {accept: false, token: third.token});
+  assert.equal((await r(owner, base + '/invitation-link')).link.token, third.token, '拒绝不关闭共享链接');
+
+  await r(owner, base + '/members/' + editor.json.user.id, 'PATCH', {role: 'admin'});
+  const adminLink = (await r(editor, base + '/invitation-link', 'PUT', {role: 'editor'})).link;
+  assert.notEqual(adminLink.id, third.id);
+  await r(owner, base + '/invitations/' + adminLink.id + '/resend', 'POST', undefined, 403);
+  await r(editor, base + '/invitations/' + third.id, 'DELETE', undefined, 403);
+  assert.equal((await r(owner, base + '/invitation-link')).link.token, third.token);
+  assert.ok(!JSON.stringify(await r(editor, base + '/invitations')).includes(third.token));
+  await r(owner, base + '/members/' + editor.json.user.id, 'PATCH', {role: 'editor'});
+  await r(outsider, '/invitations/link/' + adminLink.token, 'GET', undefined, 404);
+  await r(outsider, '/invitations/' + adminLink.id + '/respond', 'POST', {accept: true, token: adminLink.token}, 409);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM team_invitations WHERE team_id=? AND created_by=? AND target_id IS NULL').get(third.teamId, owner.json.user.id).n, 1);
+  const stored = db.prepare('SELECT * FROM team_invitations WHERE id=?').get(third.id);
+  assert.equal(stored.token_hash, createHash('sha256').update(third.token).digest('hex'));
+  assert.ok(stored.link_token && !JSON.stringify(stored).includes(third.token));
+
+  // 模拟旧版数据库含多条链接；恢复整个数据目录后只保留最新链接且可再次复制。
+  db.exec('DROP INDEX team_one_invitation_link');
+  db.prepare(`INSERT INTO team_invitations(id,team_id,created_by,target_id,role,token_hash,expires_at,created_at)
+    VALUES('00000000-0000-4000-8000-000000000001',?,?,NULL,'viewer','old-link-hash',?,'2000-01-01T00:00:00.000Z')`).run(third.teamId, owner.json.user.id, Date.now() + 86400000);
+  const resumed = await fixture(t, {}, async directory => {
+    await db.backup(resolve(directory, 'notes.sqlite'));
+    await copyFile(resolve(dataDir, 'invitation-link.key'), resolve(directory, 'invitation-link.key'));
+  });
+  const restored = (await resumed.request(base + '/invitation-link', {cookie: owner.cookie})).json.link;
+  assert.equal(restored.id, third.id); assert.equal(restored.token, third.token);
+  await resumed.request('/invitations/link/' + third.token, {cookie: outsider.cookie});
+  const restoredDb = new Database(resolve(resumed.dataDir, 'notes.sqlite'));
+  try {
+    assert.equal(restoredDb.prepare('SELECT COUNT(*) n FROM team_invitations WHERE team_id=? AND created_by=? AND target_id IS NULL').get(third.teamId, owner.json.user.id).n, 1);
+    assert.equal(restoredDb.prepare('SELECT COUNT(*) n FROM team_invitations WHERE target_id IS NOT NULL').get().n, 2);
+    assert.throws(() => restoredDb.prepare(`INSERT INTO team_invitations(id,team_id,created_by,role,token_hash,expires_at,created_at) VALUES('duplicate',?,?,'viewer','duplicate-token',0,'')`).run(third.teamId, owner.json.user.id), /UNIQUE/);
+  } finally { restoredDb.close(); }
 });
 
 test('文件夹 ACL：列表、直接访问、角色上限、事务回滚及删除恢复保留原范围', {timeout: 60000}, async t => {

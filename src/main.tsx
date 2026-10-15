@@ -1,7 +1,7 @@
 import {createRoot} from 'react-dom/client';
-import {ConfigProvider} from '@arco-design/web-react';
+import {HintProvider} from './HintProvider';
 import '@arco-design/web-react/dist/css/arco.css';
 import './style.css';
 import {App} from './App';
 
-createRoot(document.getElementById('root')!).render(<ConfigProvider><App/></ConfigProvider>);
+createRoot(document.getElementById('root')!).render(<HintProvider><App/></HintProvider>);

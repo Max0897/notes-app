@@ -3,11 +3,13 @@ import type Database from 'better-sqlite3';
 import type {Hono} from 'hono';
 import {streamSSE} from 'hono/streaming';
 import type {AppContext, AppEnv, JsonObject} from './index.js';
+import {invitationLinkTokens} from './invitationLinks.js';
 
 const retention = 30 * 86400000;
 type Role = 'owner' | 'admin' | 'editor' | 'viewer';
 type Row = Record<string, any>;
 type Dependencies = {
+  dataDir: string;
   readBody: (c: AppContext, keys: readonly string[]) => Promise<JsonObject>;
   requireAuth: any;
   requireLiveSession: (c: AppContext) => void;
@@ -55,6 +57,12 @@ export function initCollaboration(db: Database.Database) {
     if (!(db.prepare(`PRAGMA table_info(${table})`).all() as Row[]).some(row => row.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   };
   db.transaction(() => {
+    add('team_invitations', 'link_token', 'TEXT');
+    // 旧版为每次生成新建记录；升级后每位邀请人在每个团队仅保留最新的一项。
+    db.exec(`DELETE FROM team_invitations WHERE target_id IS NULL AND id IN (
+      SELECT id FROM (SELECT id,ROW_NUMBER() OVER(PARTITION BY team_id,created_by ORDER BY created_at DESC,rowid DESC) AS n
+        FROM team_invitations WHERE target_id IS NULL) WHERE n>1);
+      CREATE UNIQUE INDEX IF NOT EXISTS team_one_invitation_link ON team_invitations(team_id,created_by) WHERE target_id IS NULL;`);
     add('folders', 'space_id', 'TEXT REFERENCES spaces(id)');
     add('folders', 'access_mode', "TEXT NOT NULL DEFAULT 'team'");
     add('folders', 'deleted_at', 'TEXT');
@@ -93,6 +101,7 @@ export function initCollaboration(db: Database.Database) {
 }
 
 export function registerCollaboration(app: Hono<AppEnv>, db: Database.Database, deps: Dependencies) {
+  const linkTokens = invitationLinkTokens(deps.dataDir);
   const {readBody, requireAuth, requireLiveSession, verifyCurrentPassword, validateContent, folderName, ApiError} = deps;
   function fail(status: 400 | 401 | 403 | 404 | 409 | 429, message: string): never { throw new ApiError(status, message); }
   const uid = (c: AppContext) => c.get('user')!.id;
@@ -246,6 +255,44 @@ export function registerCollaboration(app: Hono<AppEnv>, db: Database.Database, 
   app.post('/api/teams/:teamId/leave', c => { db.transaction(() => removeMember(c, team(c), uid(c)))(); return c.json({ok: true}); });
   function invitationDto(row: Row) { return {id: row.id, teamId: row.team_id, teamName: row.team_name, inviter: row.inviter, username: row.username, role: row.role, status: row.status === 'pending' && row.expires_at <= Date.now() ? 'expired' : row.status, expiresAt: row.expires_at, createdAt: row.created_at, isLink: !row.target_id}; }
   const inviteQuery = `SELECT i.*,t.name AS team_name,u.username AS inviter,target.username FROM team_invitations i JOIN teams t ON t.id=i.team_id JOIN users u ON u.id=i.created_by LEFT JOIN users target ON target.id=i.target_id`;
+  const myLink = (c: AppContext, t: Row) => db.prepare(inviteQuery + ' WHERE i.team_id=? AND i.created_by=? AND i.target_id IS NULL').get(t.id, uid(c)) as Row | undefined;
+  function linkDto(row: Row) {
+    return {...invitationDto(row), token: row.status === 'pending' && row.expires_at > Date.now() && row.link_token ? linkTokens.decrypt(row.link_token, row.id) : undefined};
+  }
+  function linkRole(value: unknown) {
+    if (typeof value !== 'string' || !['viewer', 'editor'].includes(value)) fail(400, '邀请仅支持查看者或编辑者');
+    return value;
+  }
+  function saveLink(c: AppContext, role: string, regenerate = false) {
+    return db.transaction(() => {
+      const t = team(c, 'manage'), previous = myLink(c, t);
+      if (!regenerate && previous?.status === 'pending' && previous.expires_at > Date.now() && previous.link_token && previous.role === role) return linkDto(previous);
+      const invitationId = previous?.id ?? randomUUID(), token = randomBytes(32).toString('base64url');
+      if (previous) db.prepare("UPDATE team_invitations SET role=?,token_hash=?,link_token=?,status='pending',expires_at=?,accepted_by=NULL WHERE id=?").run(role, digest(token), linkTokens.encrypt(token, invitationId), Date.now() + 7 * 86400000, invitationId);
+      else db.prepare('INSERT INTO team_invitations(id,team_id,created_by,target_id,role,token_hash,link_token,expires_at,created_at) VALUES(?,?,?,NULL,?,?,?,?,?)').run(invitationId, t.id, uid(c), role, digest(token), linkTokens.encrypt(token, invitationId), Date.now() + 7 * 86400000, now());
+      audit(c, t, previous ? '重新生成邀请链接' : '开启邀请链接', '邀请链接');
+      return linkDto(myLink(c, t)!);
+    })();
+  }
+  app.get('/api/teams/:teamId/invitation-link', c => {
+    const row = myLink(c, team(c, 'manage'));
+    c.header('Cache-Control', 'no-store');
+    return c.json({link: row ? linkDto(row) : null});
+  });
+  app.put('/api/teams/:teamId/invitation-link', async c => {
+    const body = await readBody(c, ['role']); inviteLimit(c);
+    const link = saveLink(c, linkRole(body.role ?? 'viewer'), true);
+    c.header('Cache-Control', 'no-store'); return c.json({link});
+  });
+  app.delete('/api/teams/:teamId/invitation-link', c => {
+    db.transaction(() => {
+      const t = team(c, 'manage'), row = myLink(c, t);
+      if (row?.status === 'pending') {
+        db.prepare("UPDATE team_invitations SET status='revoked' WHERE id=?").run(row.id);
+        audit(c, t, '关闭邀请链接', '邀请链接');
+      }
+    })(); return c.json({ok: true});
+  });
   app.get('/api/invitations', c => {
     const invitations = db.prepare(inviteQuery + " WHERE i.target_id=? AND t.deleted_at IS NULL AND i.status='pending' AND i.expires_at>? ORDER BY i.created_at DESC").all(uid(c), Date.now()) as Row[];
     return c.json({invitations: invitations.map(invitationDto)});
@@ -255,36 +302,51 @@ export function registerCollaboration(app: Hono<AppEnv>, db: Database.Database, 
     const token = c.req.param('token');
     if (!/^[A-Za-z0-9_-]{43}$/.test(token)) fail(404, '邀请链接无效');
     const row = db.prepare(inviteQuery + " WHERE i.token_hash=? AND i.target_id IS NULL AND t.deleted_at IS NULL").get(digest(token)) as Row | undefined;
-    if (!row || row.status !== 'pending' || row.expires_at <= Date.now()) fail(404, '邀请链接已使用、撤销或过期');
+    if (!row || row.status !== 'pending' || row.expires_at <= Date.now()) fail(404, '邀请链接已关闭、重新生成或过期');
+    const inviter = db.prepare('SELECT role FROM team_members WHERE team_id=? AND user_id=?').get(row.team_id, row.created_by) as Row | undefined;
+    if (!inviter || !manager(inviter.role)) fail(404, '邀请链接已失效');
     return c.json({invitation: invitationDto(row)});
   });
-  app.get('/api/teams/:teamId/invitations', c => { const t = team(c, 'manage'); return c.json({invitations: (db.prepare(inviteQuery + ' WHERE i.team_id=? ORDER BY i.created_at DESC LIMIT 200').all(t.id) as Row[]).map(invitationDto)}); });
+  app.get('/api/teams/:teamId/invitations', c => { const t = team(c, 'manage'); return c.json({invitations: (db.prepare(inviteQuery + ' WHERE i.team_id=? AND i.target_id IS NOT NULL ORDER BY i.created_at DESC LIMIT 200').all(t.id) as Row[]).map(invitationDto)}); });
   app.post('/api/teams/:teamId/invitations', async c => {
     const body = await readBody(c, ['username', 'role']); inviteLimit(c);
-    const role = body.role ?? 'viewer';
-    if (typeof role !== 'string' || !['viewer', 'editor'].includes(role)) fail(400, '邀请仅支持查看者或编辑者');
-    let target: Row | undefined;
-    if ('username' in body) { target = db.prepare('SELECT id FROM users WHERE username_key=?').get(text(body.username, 3, 32).normalize('NFKC').toLowerCase()) as Row | undefined; if (!target) fail(404, '该用户名尚未注册'); }
+    const role = linkRole(body.role ?? 'viewer');
+    // 兼容旧客户端的生成入口；重复获取同一有效链接不会新增记录或轮换令牌。
+    if (!('username' in body)) { const link = saveLink(c, role); c.header('Cache-Control', 'no-store'); return c.json({id: link.id, token: link.token}, 201); }
+    const target = db.prepare('SELECT id FROM users WHERE username_key=?').get(text(body.username, 3, 32).normalize('NFKC').toLowerCase()) as Row | undefined;
+    if (!target) fail(404, '该用户名尚未注册');
     const token = randomBytes(32).toString('base64url'), invitationId = randomUUID();
     db.transaction(() => {
       const t = team(c, 'manage');
-      if (target && db.prepare('SELECT 1 FROM team_members WHERE team_id=? AND user_id=?').get(t.id, target.id)) fail(409, '该用户已是团队成员');
-      if (target && db.prepare("SELECT 1 FROM team_invitations WHERE team_id=? AND target_id=? AND status='pending' AND expires_at>?").get(t.id, target.id, Date.now())) fail(409, '已有待接受邀请，可在列表重新邀请');
-      db.prepare('INSERT INTO team_invitations(id,team_id,created_by,target_id,role,token_hash,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?)').run(invitationId, t.id, uid(c), target?.id ?? null, role, digest(token), Date.now() + 7 * 86400000, now());
-      audit(c, t, '邀请成员', target ? String(body.username) : '单次邀请链接');
-    })(); return c.json({id: invitationId, token: target ? undefined : token}, 201);
+      if (db.prepare('SELECT 1 FROM team_members WHERE team_id=? AND user_id=?').get(t.id, target.id)) fail(409, '该用户已是团队成员');
+      if (db.prepare("SELECT 1 FROM team_invitations WHERE team_id=? AND target_id=? AND status='pending' AND expires_at>?").get(t.id, target.id, Date.now())) fail(409, '已有待接受邀请，可在列表重新邀请');
+      db.prepare('INSERT INTO team_invitations(id,team_id,created_by,target_id,role,token_hash,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?)').run(invitationId, t.id, uid(c), target.id, role, digest(token), Date.now() + 7 * 86400000, now());
+      audit(c, t, '邀请成员', String(body.username));
+    })(); return c.json({id: invitationId}, 201);
   });
   app.post('/api/teams/:teamId/invitations/:invitationId/resend', c => {
-    inviteLimit(c); const token = randomBytes(32).toString('base64url'); let link = false;
+    inviteLimit(c); let token = randomBytes(32).toString('base64url'); let link = false;
     db.transaction(() => {
       const t = team(c, 'manage'), inv = db.prepare('SELECT * FROM team_invitations WHERE id=? AND team_id=?').get(id(c.req.param('invitationId')), t.id) as Row | undefined;
-      if (!inv || inv.status === 'accepted') fail(400, '该邀请不可重新发送');
+      if (!inv) fail(400, '该邀请不可重新发送');
+      if (!inv.target_id) {
+        if (inv.created_by !== uid(c)) fail(403, '只能管理自己的邀请链接');
+        link = true; const renewed = saveLink(c, inv.role, true);
+        // 兼容旧入口，响应仍返回新令牌。
+        token = renewed.token!; return;
+      }
+      if (inv.status === 'accepted') fail(400, '该邀请不可重新发送');
       if (inv.target_id && db.prepare('SELECT 1 FROM team_members WHERE team_id=? AND user_id=?').get(t.id, inv.target_id)) fail(409, '该用户已加入团队');
-      link = !inv.target_id;
-      db.prepare("UPDATE team_invitations SET status='pending',created_by=?,token_hash=?,expires_at=? WHERE id=?").run(uid(c), digest(token), Date.now() + 7 * 86400000, inv.id); audit(c, t, '重新邀请', inv.target_id ?? '单次邀请链接');
-    })(); return c.json({token: link ? token : undefined});
+      db.prepare("UPDATE team_invitations SET status='pending',created_by=?,token_hash=?,expires_at=? WHERE id=?").run(uid(c), digest(token), Date.now() + 7 * 86400000, inv.id); audit(c, t, '重新邀请', inv.target_id);
+    })(); c.header('Cache-Control', 'no-store'); return c.json({token: link ? token : undefined});
   });
-  app.delete('/api/teams/:teamId/invitations/:invitationId', c => { db.transaction(() => { const t = team(c, 'manage'); const result = db.prepare("UPDATE team_invitations SET status='revoked' WHERE id=? AND team_id=? AND status='pending'").run(id(c.req.param('invitationId')), t.id); if (!result.changes) fail(409, '邀请已失效'); audit(c, t, '撤销邀请', c.req.param('invitationId')); })(); return c.json({ok: true}); });
+  app.delete('/api/teams/:teamId/invitations/:invitationId', c => { db.transaction(() => {
+    const t = team(c, 'manage'), invitationId = id(c.req.param('invitationId'));
+    const inv = db.prepare('SELECT * FROM team_invitations WHERE id=? AND team_id=?').get(invitationId, t.id) as Row | undefined;
+    if (inv && !inv.target_id && inv.created_by !== uid(c)) fail(403, '只能管理自己的邀请链接');
+    const result = db.prepare("UPDATE team_invitations SET status='revoked' WHERE id=? AND team_id=? AND status='pending'").run(invitationId, t.id);
+    if (!result.changes) fail(409, '邀请已失效'); audit(c, t, inv?.target_id ? '撤销邀请' : '关闭邀请链接', invitationId);
+  })(); return c.json({ok: true}); });
   app.post('/api/invitations/:invitationId/respond', async c => {
     const body = await readBody(c, ['accept', 'token']); inviteLimit(c);
     if (typeof body.accept !== 'boolean') fail(400, '请选择接受或拒绝');
@@ -298,9 +360,12 @@ export function registerCollaboration(app: Hono<AppEnv>, db: Database.Database, 
       const inviter = db.prepare('SELECT role FROM team_members WHERE team_id=? AND user_id=?').get(inv.team_id, inv.created_by) as Row | undefined;
       if (!inviter || !manager(inviter.role)) fail(409, '邀请人已没有邀请权限');
       if (body.accept) {
-        if (db.prepare('SELECT 1 FROM team_members WHERE team_id=? AND user_id=?').get(inv.team_id, uid(c))) fail(409, '你已经是团队成员');
+        if (db.prepare('SELECT 1 FROM team_members WHERE team_id=? AND user_id=?').get(inv.team_id, uid(c))) {
+          if (!inv.target_id) return;
+          fail(409, '你已经是团队成员');
+        }
         db.prepare('INSERT OR IGNORE INTO team_members VALUES(?,?,?,?)').run(inv.team_id, uid(c), inv.role, now());
-        db.prepare("UPDATE team_invitations SET status='accepted',accepted_by=? WHERE id=?").run(uid(c), inv.id);
+        if (inv.target_id) db.prepare("UPDATE team_invitations SET status='accepted',accepted_by=? WHERE id=?").run(uid(c), inv.id);
       } else if (inv.target_id) db.prepare("UPDATE team_invitations SET status='rejected' WHERE id=?").run(inv.id);
       audit(c, {id: inv.team_id}, body.accept ? '加入团队' : '拒绝邀请', c.get('user')!.username);
     })(); return c.json({ok: true});

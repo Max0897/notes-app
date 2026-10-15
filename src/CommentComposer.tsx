@@ -5,6 +5,7 @@ import {EditorContent, useEditor, type Editor} from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import {displayName} from './api';
 import {UserAvatar} from './UserAvatar';
+import {useHintTitle} from './hints';
 import {CommentMention, commentPayload, type CommentPayload, type MentionMember} from './commentMentions';
 
 function mentionAt(editor: Editor) {
@@ -19,6 +20,7 @@ export function CommentComposer({members, busy, replyTo, onCancelReply, onSend}:
   members: MentionMember[]; busy: boolean; replyTo?: {id: string; name: string} | null;
   onCancelReply?: () => void; onSend: (payload: CommentPayload) => Promise<boolean>;
 }) {
+  const sendTitle = useHintTitle('Enter 发送，Shift+Enter 换行');
   const [draft, setDraft] = useState<CommentPayload>({body: '', mentions: [], mentionRanges: []});
   const [mention, setMention] = useState<ReturnType<typeof mentionAt>>(null), [active, setActive] = useState(0);
   const sending = useRef(false);
@@ -76,7 +78,7 @@ export function CommentComposer({members, busy, replyTo, onCancelReply, onSend}:
       <UserAvatar user={{...member, avatarStyle: member.avatarStyle ?? 'cutouts', avatarSeed: member.avatarSeed ?? member.id}} size={24}/><span>{displayName(member)}<small>@{member.username}</small></span>
     </button>)}</div>}
     <div className="comment-compose-footer"><Typography.Text type={invalid ? 'error' : 'secondary'}>{draft.mentions.length > 20 ? '最多提及 20 位成员' : draft.body.length + ' / 2000'}</Typography.Text>
-      <Space size={4}><Button aria-label="提及成员" type="text" size="small" icon={<AtSign size={16}/>} disabled={busy} onClick={() => editor?.chain().focus().insertContent('@').run()}/><Button type="primary" size="small" htmlType="submit" title="Enter 发送，Shift+Enter 换行" disabled={!draft.body || invalid} loading={busy}>{replyTo ? '发送回复' : '发送评论'}</Button></Space>
+      <Space size={4}><Button aria-label="提及成员" type="text" size="small" icon={<AtSign size={16}/>} disabled={busy} onClick={() => editor?.chain().focus().insertContent('@').run()}/><Button type="primary" size="small" htmlType="submit" title={sendTitle} disabled={!draft.body || invalid} loading={busy}>{replyTo ? '发送回复' : '发送评论'}</Button></Space>
     </div>
   </form>;
 }
