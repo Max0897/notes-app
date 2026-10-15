@@ -49,7 +49,7 @@ const scopeName=scope==='all'?'所有备忘录':scope==='pinned'?'已置顶':sco
 
 if(boot)return <div className="boot"><Spin tip="正在打开你的备忘录"/></div>;
 if(!user)return <div className="auth-page"><Card className="auth-card">
-  <div className="auth-brand"><img src="/favicon.svg" width={40} height={40} alt="拾记"/><Title heading={4} style={{margin:0}}>拾记</Title></div>
+  <div className="auth-brand"><img src="/favicon.svg" width={40} height={40} alt="备忘录"/><Title heading={4} style={{margin:0}}>备忘录</Title></div>
   <Paragraph type="secondary">{authMode?'创建你的账号，让每个想法都有归处。':'登录后，继续上次的灵感。'}</Paragraph>
   <form className="auth-form" onSubmit={auth}>
     <label><Text type="secondary">用户名</Text></label>
@@ -63,7 +63,7 @@ if(!user)return <div className="auth-page"><Card className="auth-card">
 
 return <div className={'app-shell'+(mobile?' mobile-edit':'')}>
 <aside className="sidebar">
-  <div className="sidebar-brand"><img src="/favicon.svg" width={32} height={32} alt="拾记"/><Title heading={6} style={{margin:0}}>拾记</Title></div>
+  <div className="sidebar-brand"><img src="/favicon.svg" width={32} height={32} alt="备忘录"/><Title heading={6} style={{margin:0}}>备忘录</Title></div>
   <Menu selectedKeys={[scope]} onClickMenuItem={key=>switchScope(String(key))}>
     <Menu.Item key="all"><Ico Icon={BookOpen} text="所有备忘录"/></Menu.Item>
     <Menu.Item key="pinned"><Ico Icon={Star} text="已置顶"/></Menu.Item>

@@ -61,7 +61,7 @@ const authPage = await evaluate(`(()=>{
     brand:(card&&card.querySelector('.arco-typography')||{}).textContent||''};
 })()`);
 check(authPage.hasCard, '未登录时展示登录界面（.auth-card）');
-check(/拾记/.test(authPage.brand), '界面展示应用名「拾记」', authPage.brand);
+check(/备忘录/.test(authPage.brand), '界面展示应用名「备忘录」', authPage.brand);
 check(authPage.submitText === '登录', '默认处于登录模式', `按钮文案 "${authPage.submitText}"`);
 
 section('通过界面注册账号');

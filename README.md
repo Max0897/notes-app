@@ -1,246 +1,333 @@
-# 拾记 · 备忘录
+# 备忘录
 
-一个轻量精简的备忘录 Web 系统，交互参考 macOS 备忘录，界面基于 Arco Design 原生组件。
+轻量、可自托管的备忘录 Web 应用。用文件夹整理日常记录，用富文本和待办清单梳理想法，登录同一账号即可在不同设备访问。
 
-前端 React + TypeScript + Vite，后端 Hono + SQLite，前后端同源部署 —— 一个前端、一个后端服务、一个数据库文件。
+界面参考 macOS 备忘录，基于 Arco Design 原生组件；React + TypeScript 构建前端，Hono + SQLite 提供后端，一个服务即可同时提供页面与 API。
+
+[界面预览](#界面预览) · [功能](#功能) · [快速开始](#快速开始) · [Docker 部署](#docker-部署) · [数据与备份](#数据与备份) · [常见问题](#常见问题)
+
+## 界面预览
+
+以下截图来自本地运行的应用，使用独立演示账号与示例笔记，不包含真实用户数据。图片随仓库保存在 [`docs/images/`](docs/images/)。
+
+### 桌面：文件夹、笔记列表与编辑区
+
+![备忘录桌面界面：左侧文件夹、中间笔记列表、右侧富文本编辑器及待办清单](docs/images/desktop.jpg)
+
+桌面端采用三栏布局，置顶记录优先展示；编辑区提供格式工具、文件夹切换与保存状态。
+
+### 登录与账号
+
+![备忘录登录界面：用户名、密码与创建账号入口](docs/images/login.jpg)
+
+注册后即可开始使用，每个账号拥有独立的文件夹与笔记。
+
+### 手机：专注编辑
+
+<img src="docs/images/mobile-editor.jpg" alt="390 像素宽手机视图：待办清单、格式工具栏、保存状态与返回列表按钮" width="320" />
+
+窄屏下列表与编辑区分别显示，点击左上角箭头返回列表。当前手机布局隐藏文件夹侧栏，文件夹管理和退出登录建议在桌面端操作。
 
 ## 功能
 
-- **账号**：注册 / 登录 / 退出，数据按用户隔离，任何接口都不会信任前端提交的用户 ID
-- **三栏布局**：文件夹侧栏 → 笔记列表 → 编辑区；窄屏按「文件夹 → 列表 → 编辑」逐层切换
-- **文件夹**：分组标题右侧加号新建、每项右侧三点菜单（在此新建笔记 / 重命名 / 删除）
-- **笔记**：新建、编辑、置顶、移入最近删除、恢复、永久删除
-- **富文本**：Tiptap，支持标题层级、粗体、斜体、有序/无序列表、待办清单、撤销重做
-- **搜索**：匹配标题与正文，列表按修改时间倒序
-- **自动保存**：防抖保存 + 状态提示（保存中 / 已保存 / 保存失败可重试）
-- **多设备访问**：登录同一账号即可访问；冲突检测基于 `version`，409 时提供「使用服务器版本」或「我的编辑另存为副本」
+| 功能 | 说明 |
+| --- | --- |
+| 账号与隔离 | 注册、登录、退出；接口按当前登录用户隔离数据 |
+| 文件夹 | 新建、重命名、删除；删除文件夹后笔记移至未分类 |
+| 笔记管理 | 新建、编辑、置顶、移动文件夹、移到最近删除、恢复及永久删除 |
+| 富文本 | 标题、粗体、斜体、有序／无序列表、待办清单、撤销与重做 |
+| 搜索 | 在当前分类内匹配标题与正文；置顶优先，其余按修改时间倒序 |
+| 自动保存 | 停止输入约 700 毫秒后保存，展示保存状态，失败时可点击重试 |
+| 多设备编辑 | 登录同一账号访问；版本冲突时可采用服务器版本或将本地编辑另存为副本 |
+| 自托管 | 本地 Node.js 或 Docker 部署；SQLite 数据保存在持久化目录 |
+
+### 基本操作
+
+1. 点击「创建账号」注册：用户名 3–32 个字符，密码 8–128 个字符。新账号会获得默认文件夹和欢迎笔记。
+2. 点击列表右上角的铅笔按钮新建备忘录，填写标题与正文；离开页面前确认状态为「已保存」。
+3. 点击侧栏「文件夹」右侧的加号创建文件夹，悬停文件夹后打开三点菜单管理；编辑区顶部的下拉框可移动当前笔记。
+4. 点击「置顶」保留重要记录；搜索框只筛选当前分类中的内容。
+5. 删除笔记后可到「最近删除」恢复；永久删除无法通过应用恢复。
 
 ## 技术栈
 
 | 层 | 选型 |
-|---|---|
-| 页面 | React 18 + TypeScript 5 |
-| 构建 | Vite 6 |
-| UI 组件库 | Arco Design React（界面以原生组件与设计令牌为主，自定义 CSS 只保留布局） |
-| 图标 | lucide-react |
-| 编辑器 | Tiptap 2（正文同时保存 Tiptap JSON 与纯文本，后者用于搜索与列表摘要） |
-| 后端 | Hono + @hono/node-server |
-| 数据库 | SQLite（better-sqlite3，单文件） |
-| 认证 | Argon2id 密码哈希 + 服务端 Session（HttpOnly Cookie） |
+| --- | --- |
+| 页面 | React 18、TypeScript 5、Vite 6 |
+| UI 与图标 | Arco Design React、lucide-react |
+| 编辑器 | Tiptap 2；正文保存为结构化 JSON，同时保存纯文本用于搜索和摘要 |
+| 后端 | Hono、@hono/node-server |
+| 数据库 | SQLite、better-sqlite3 |
+| 认证 | Argon2id 密码哈希、服务端 Session、HttpOnly Cookie |
 
 ## 快速开始
 
-需要 Node.js 22 或更高版本（`better-sqlite3@13` 要求 `>=22`）。
+### 环境要求
+
+- Node.js 22 或更高版本，附带 npm；仓库包含 `package-lock.json`。
+- Git；使用 Docker 方式时仅需 Git 与 Docker Compose，无需在宿主机安装 Node.js。
+- 原生模块安装若触发本地编译，需要 Python 3 和 C++ 构建工具，见[常见问题](#常见问题)。
+
+### 本地运行
 
 ```bash
-yarn install        # 或 npm ci（仓库带 package-lock.json）
-yarn build          # 类型检查 + 构建前端 dist/ + 编译服务端 dist-server/
-yarn start          # 开发方式启动：直接用 tsx 跑 server/index.ts
+git clone https://github.com/Max0897/notes-app.git
+cd notes-app
+npm ci
+npm run build
+npm start
 ```
 
-打开 http://127.0.0.1:3000 ，点「创建账号」注册（用户名 3–32 字符，密码至少 8 位），新账号会自动获得一个默认文件夹和一篇欢迎备忘录。
+打开 <http://127.0.0.1:3000>。服务端同时提供构建后的前端页面与 `/api` 接口，首次启动会自动创建 `data/notes.sqlite`。
 
-想按生产方式启动（不经过 tsx，直接跑编译产物，与容器内的启动方式一致）：
+`npm start` 使用 tsx 运行 TypeScript 服务端。使用编译后的服务端时，在构建完成后改为：
 
 ```bash
-yarn start:prod     # 等价于 node dist-server/index.js
+npm run start:prod
 ```
 
-开发模式（Vite 热更新，自动代理 API 到 3000 端口）：
+`start:prod` 仅表示运行编译产物，不会自动设置 `NODE_ENV`、HTTPS Cookie 或公网地址；这些配置见下文。
+
+### 开发模式
+
+在仓库根目录打开两个终端，分别启动后端与 Vite：
 
 ```bash
-yarn dev
+# 终端 1：后端，默认 127.0.0.1:3000
+npm start
 ```
 
-### 环境变量
+```bash
+# 终端 2：前端热更新，默认 localhost:5173
+npm run dev
+```
+
+访问 Vite 输出的本地地址（通常为 <http://localhost:5173>）。Vite 将 `/api` 请求代理到 `127.0.0.1:3000`；只运行 `npm run dev` 不会启动后端。
+
+### 常用命令
+
+| 命令 | 用途 |
+| --- | --- |
+| `npm start` | 用 tsx 启动后端 |
+| `npm run dev` | 启动 Vite 开发服务器 |
+| `npm run build` | 前端类型检查、打包到 `dist/`，编译后端到 `dist-server/` |
+| `npm run start:prod` | 运行 `dist-server/index.js` |
+| `npm run typecheck` | 检查前端及 Vite 配置的 TypeScript 类型 |
+| `npm run lint` | 执行 Oxlint 静态检查 |
+| `npm run test:api` | 使用临时数据库验证后端接口 |
+| `npm run test:docker` | 静态检查 Docker 配置及构建产物，需先构建 |
+
+## 环境变量
+
+服务端直接读取进程环境变量，当前没有自动加载 `.env` 文件的逻辑。可通过终端设置变量，或通过 Compose 的 `environment` 配置传入。
 
 | 变量 | 默认值 | 说明 |
-|---|---|---|
-| `HOST` | `127.0.0.1` | 监听地址，设为 `0.0.0.0` 可供局域网访问 |
-| `PORT` | `3000` | 监听端口 |
-| `DATA_DIR` | `./data` | SQLite 文件所在目录 |
-| `NODE_ENV` | — | 设为 `production` 时按生产模式运行 |
-| `SECURE_COOKIES` | 跟随 `NODE_ENV` | 是否下发 `Secure` + `__Host-` 前缀的会话 Cookie |
-| `PUBLIC_ORIGIN` | 空 | 写操作的 Origin 白名单，填公网地址如 `https://note.example.com` |
+| --- | --- | --- |
+| `HOST` | `127.0.0.1` | 服务监听地址；容器内使用 `0.0.0.0` |
+| `PORT` | `3000` | 服务端口；修改后需同步调整 Vite 的代理目标或容器端口映射 |
+| `DATA_DIR` | 项目根目录下的 `data/` | SQLite 存储目录；相对路径按进程工作目录解析 |
+| `NODE_ENV` | 未设置 | 设置为 `production` 时默认启用安全 Cookie |
+| `SECURE_COOKIES` | 跟随 `NODE_ENV` | `true` 启用 `Secure` 和 `__Host-` Cookie；直接使用 HTTP 时设为 `false` |
+| `PUBLIC_ORIGIN` | 空 | 唯一允许的网页来源，如 `https://notes.example.com`；留空时比较 `Origin` 与请求 Host |
 
-`SECURE_COOKIES` 单独列出来是因为它容易踩坑：**只有页面本身跑在 HTTPS 上，`Secure` Cookie 才会被浏览器保存**。
-容器里通常只跑 HTTP、由前置反向代理终止 TLS，此时若跟着 `NODE_ENV=production` 下发 `Secure`，
-浏览器会静默丢弃会话 Cookie，表现为「登录成功但立刻掉线」。所以：
+Windows PowerShell 示例：
 
-- 直接用 HTTP 访问（含本机 `docker run -p 3000:3000`）：保持 `SECURE_COOKIES=false`
-- 前面挂了 Nginx / Caddy / Traefik / Cloudflare Tunnel 并启用 HTTPS：设成 `true`
+```powershell
+$env:HOST = '127.0.0.1'
+$env:PORT = '3000'
+$env:SECURE_COOKIES = 'false'
+npm run start:prod
+```
 
-`PUBLIC_ORIGIN` 留空时，写操作按「`Origin` 的 host 等于 `Host` 头」判断同源。
-反向代理若改写了 `Host`（部分隧道 / 代理的默认行为），这个判断会把正常请求误判成跨站、全部 403。
-此时填上公网地址即可，比对变成固定白名单，比原来更严格。
+Linux／macOS 示例：
+
+```bash
+HOST=127.0.0.1 PORT=3000 SECURE_COOKIES=false npm run start:prod
+```
 
 ## Docker 部署
 
-镜像分两个阶段：构建阶段装依赖、编译前端与服务端，运行阶段只带生产依赖和编译产物，
-以非 root 的 `node` 用户启动，SQLite 落在 `/data` 卷里。
+### 直接通过 HTTP 访问
 
 ```bash
 docker compose up -d --build
+docker compose ps
 ```
 
-打开 http://localhost:3000 即可。常用操作：
+打开 <http://localhost:3000>。基础配置映射宿主机的 3000 端口，设置 `SECURE_COOKIES=false`，并将 `/data` 挂载到 Compose 管理的 `notes-data` 具名卷。
 
 ```bash
-docker compose ps            # 状态，应显示 healthy
-docker compose logs -f       # 日志
-docker compose down          # 停止，数据留在卷里
-docker compose down -v       # 停止并连数据卷一起删除
+docker compose logs -f notes-app  # 查看日志
+docker compose down             # 停止并移除容器，保留数据卷
 ```
 
-不用 Compose 也行：
+`docker compose down -v` 会同时删除具名数据卷及其中的账号和笔记，不用于日常停止服务。
+
+不使用 Compose 时：
 
 ```bash
 docker build -t notes-app .
 docker run -d --name notes-app -p 3000:3000 -v notes-data:/data notes-app:latest
 ```
 
-### 数据与备份
+### HTTPS 与反向代理
 
-数据库是容器内 `/data/notes.sqlite` 单个文件，挂在具名卷 `notes-data` 上，**重建镜像不会丢数据**。
+仓库提供 [`docker-compose.prod.yml`](docker-compose.prod.yml) 覆盖配置。使用前将其中的 `PUBLIC_ORIGIN` 改成自己的 HTTPS 域名；现有值是项目部署实例的地址。
 
 ```bash
-docker compose cp notes-app:/data/notes.sqlite ./notes-backup.sqlite   # 备份
-docker compose cp ./notes-backup.sqlite notes-app:/data/notes.sqlite   # 恢复
-docker compose restart notes-app
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ```
 
-想直接落在宿主机目录，把 `docker-compose.yml` 里的 `- notes-data:/data` 换成 `- ./data:/data`。
-容器以 uid 1000 的 `node` 用户运行，Linux 上要先 `sudo chown -R 1000:1000 ./data`。
+此配置仅绑定宿主机 `127.0.0.1:3100`，开启安全 Cookie，反向代理应转发到该端口。配置使用 `!override` 替换基础端口映射，需要支持此标签的较新 Docker Compose；如提示标签无法识别，请更新 Compose。
 
-### 放在反向代理后面
+Caddy 示例（对应 `PUBLIC_ORIGIN=https://notes.example.com`）：
 
-- `SECURE_COOKIES` 改成 `"true"`（原因见上面的环境变量说明）
-- `PUBLIC_ORIGIN` 填公网地址，如 `https://note.example.com`（`Origin` 白名单，避免写操作被误判为跨站）
-- 反代指向 `127.0.0.1:3000`，容器内服务监听 `0.0.0.0`
-
-Caddy 例子（自动签发证书）：
-
-```
+```caddyfile
 notes.example.com {
-    reverse_proxy 127.0.0.1:3000
+    reverse_proxy 127.0.0.1:3100
 }
 ```
 
-### 构建时需要代理
+代理若运行在另一个容器内，应使用容器网络地址，不能把它自身的 `127.0.0.1` 当作宿主机。
 
-`npm ci` 默认直连 `registry.npmjs.org`。构建环境要走代理就传 build arg：
+仅页面通过 HTTPS 访问时启用 `SECURE_COOKIES=true`。如果代理会改写 Host，务必设置 `PUBLIC_ORIGIN` 为浏览器实际访问的完整来源（协议、域名及必要端口，不带路径），否则写请求可能返回 403。
+
+### 构建代理与原生依赖
+
+需要网络代理时可传入构建参数；以下多行写法适用于 Bash，PowerShell 可合并为一行：
 
 ```bash
 docker compose build \
   --build-arg HTTP_PROXY=http://host.docker.internal:7897 \
   --build-arg HTTPS_PROXY=http://host.docker.internal:7897
+docker compose up -d
 ```
 
-`host.docker.internal` 在 Docker Desktop 上指向宿主机；Linux 上用宿主机在 docker0 网桥上的地址。
+Docker Desktop 中 `host.docker.internal` 指向宿主机；Linux 环境需要自行配置可达的宿主机地址。
 
-### 原生模块与构建工具链
-
-基础镜像是 `node:22-bookworm-slim`（glibc），两个阶段用同一个基础镜像，保证构建阶段编译出的
-原生二进制和运行阶段 ABI 一致。
-
-运行阶段只用编译产物和生产依赖，tools 不进最终镜像。构建阶段**需要** `python3 / make / g++`，原因：
-
-| 模块 | 情况 |
-|---|---|
-| `better-sqlite3` | tarball 里带了 `prebuilds/linux-x64.node`（另含 `linuxmusl-x64.node`），运行时用的就是它；但随包附带了 `binding.gyp`，npm 据此把它当成「需要本地构建」，`npm ci` 会调起 node-gyp 重新编译 —— 没有工具链就直接失败 |
-| `@node-rs/argon2` | 纯平台可选依赖（`@node-rs/argon2-linux-x64-gnu`），不需要编译 |
-
-所以精简工具链这一步是踩过坑的：只按「有没有 install script」判断会漏掉 `binding.gyp` 这条路径。
-构建 `linux/arm64` 镜像同样有对应产物（`linux-arm64.node` / `@node-rs/argon2-linux-arm64-gnu`）。
-
-### 锁文件必须由完整安装生成
-
-容器里用 `npm ci` 严格照 `package-lock.json` 安装。这里有个坑：**`npm install --package-lock-only`
-生成的锁文件只记录生成平台的平台专属可选依赖**（npm/cli#4828）。当初用它生成的锁文件里只有
-`@rollup/rollup-win32-*`，rollup 声明的 `@rollup/rollup-linux-x64-gnu`、
-`@node-rs/argon2-linux-x64-gnu` 全都没进去，容器内 `vite build` 直接报
-`Cannot find module @rollup/rollup-linux-x64-gnu` 中断构建（argon2 那个更隐蔽，会在运行时才炸）。
-
-现在的锁文件由一次**完整安装**生成，含 289 个包、`optionalDependencies` 零缺失，因此
-`npm ci` 可以正常用。规范：
-
-- 增删依赖后，跑一次真正的 `npm install`（不要加 `--package-lock-only`）再提交锁文件
-- `node tests/docker-config-check.mjs` 会校验锁文件的跨平台可选依赖是否完整，
-  不完整时会要求容器内改用 `npm install`
-
-### 已知限制：限流在容器里会共享
-
-限流按 **TCP 对端 IP** 统计，代码里刻意不信任可伪造的 `X-Forwarded-For`。走 Docker 端口映射时
-所有外部请求都来自同一个网关地址，于是限流变成容器内全局共享：普通接口每分钟 180 次、
-登录/注册每 15 分钟 10 次。个人用无感；多人共用或挂在反向代理后面时，建议改
-`server/index.ts` 里的限流键，或把限流下沉到反向代理层。
-
-## 目录结构
-
-```
-src/
-  main.tsx          三栏界面、编辑器、自动保存与冲突处理
-  style.css         仅布局与 Tiptap 正文排版，视觉样式全部来自 Arco
-server/
-  index.ts          Hono 服务：认证、文件夹、笔记 CRUD、SQLite 建表与迁移
-tests/
-  api.test.mjs                 后端接口自动化测试（Node 内置 test runner）
-  e2e-public.mjs               对线上地址跑的端到端接口检查（86 项）
-  cdp-helper.mjs               浏览器测试公共助手（Edge 无头 + CDP）
-  browser-*.mjs                界面交互真实回归
-  diagnose-order.mjs           排查「保存 / 列表顺序」类问题的诊断脚本
-  docker-config-check.mjs      Docker 部署配置静态检查（不依赖本机装 Docker）
-public/favicon.svg
-
-# 构建产物（已在 .gitignore 中）
-dist/              前端静态资源
-dist-server/       服务端编译产物，node dist-server/index.js 启动
-
-# 容器化
-Dockerfile
-docker-compose.yml
-.dockerignore
-```
-
-## 安全设计
-
-- 密码使用 **Argon2id** 哈希，从不保存明文
-- Session 令牌随机生成并哈希入库，通过 **HttpOnly + SameSite** Cookie 下发，默认 7 天过期；HTTPS 环境下额外加 `Secure` 与 `__Host-` 前缀（由 `SECURE_COOKIES` 控制）
-- 所有 SQL 使用参数化查询；接口按当前登录用户过滤数据
-- 写操作校验 `Origin` 与 Host 一致；登录等接口带限流；请求体有大小上限
-- 正文 JSON 做结构校验，仅放行安全的 Tiptap 节点与标记，拒绝危险链接
-- 容器内以非 root 的 `node` 用户运行，只挂载 `/data` 一个可写目录
-- `data/`、`node_modules`、`dist`、`dist-server` 均已加入 `.gitignore`，数据库不会进入版本库
-
-## 测试
-
-```bash
-yarn test:api                       # 45 项接口检查：注册登录、富文本校验、版本冲突、用户隔离、软删/恢复、Origin 校验
-yarn test:docker                    # Docker 配置静态检查（需先 yarn build）
-```
-
-**线上端到端检查**（86 项），直接对已部署的地址跑一遍真实用户流程：注册、Cookie 安全标志、文件夹与笔记 CRUD、版本冲突、软删/恢复、用户隔离、Origin 防护、登出。
-
-```bash
-BASE=https://note.example.com yarn test:e2e
-# 本机访问 Cloudflare 需要代理时：
-BASE=https://note.example.com PROXY=http://127.0.0.1:7897 yarn test:e2e
-```
-
-界面回归需要本机有 Edge 或 Chrome，脚本会启动无头浏览器、固定桌面视口后执行真实点击与样式断言：
-
-```bash
-CDP_PORT=9222 node tests/browser-click-check.mjs      # 本地开发用
-# 线上构建产物（会真实注册/登录，账号已存在时自动改登录，可重复运行）
-CDP_PORT=9334 APP_URL=https://note.example.com/ node tests/browser-public-check.mjs
-```
-
-`browser-public-check.mjs` 共 50 项，覆盖 React/Arco 是否真正挂载、三栏布局、侧栏加号可点击、文件夹三点菜单、卡片样式、Tiptap 编辑与自动保存、前端搜索过滤，以及「页面无 JS 运行时报错」。启动无头浏览器时可加 `--proxy-server=http://127.0.0.1:7897`。
-
-> 注意：服务端限流按 TCP 对端 IP 统计（不支持 `X-Forwarded-For`）。容器部署时所有外部请求来自同一网关地址，因此 `/api/auth/register|login` 的 10 次/15 分钟是**全局共享**的。连续跑多轮测试会触发 429，重启容器即可清空计数。
+镜像使用多阶段构建，构建与运行阶段均基于 `node:22-bookworm-slim`。构建阶段安装 Python、make 和 g++ 供原生模块编译；运行阶段只保留生产依赖及构建产物，以非 root 的 `node` 用户启动，并通过 `/api/health` 检查健康状态。
 
 ## 数据与备份
 
-全部笔记和账号都存在 `data/notes.sqlite` 一个文件里，**复制这个文件即完成完整备份**。
+本地数据默认位于 `data/notes.sqlite`，Docker 中位于 `/data/notes.sqlite`。数据库启用了 WAL 模式，运行期间可能还有 `notes.sqlite-wal` 和 `notes.sqlite-shm` 文件；**运行中只复制主数据库文件不能保证得到完整一致的备份**。
 
-SQLite 适合单实例、小规模使用，需要持久化磁盘，不要放在会自动清空的临时运行环境里。需要多实例时再考虑 PostgreSQL。
+### 停机备份与恢复
+
+本地运行时，先正常停止服务，再复制整个数据目录；恢复时同样先停止服务，将数据目录替换为备份后再启动。不要把旧数据库与另一份备份的 WAL 文件混用。
+
+Docker Compose 可在停止服务后复制整个 `/data` 目录（`./notes-backup` 应使用新的空目录）：
+
+```bash
+docker compose stop notes-app
+docker compose cp notes-app:/data ./notes-backup
+docker compose start notes-app
+```
+
+恢复前先保留现有数据备份。停止服务后，将数据卷内容整体替换为备份目录内容，并保持 `node` 用户的读写权限，再启动服务。使用生产覆盖配置时，以上 Compose 命令都需加上相同的两个 `-f` 参数。
+
+需要不停机备份时，使用 SQLite 支持的一致性在线备份机制。备份包含账号、密码哈希和笔记，应存放在受控位置。
+
+重建镜像或普通 `docker compose down` 不会删除具名卷。若希望使用宿主机目录，可把卷映射改为 `./data:/data`；Linux 上需确保容器内 uid 1000 的用户有读写权限。
+
+## 项目结构
+
+```text
+notes-app/
+├── docs/images/               README 界面截图
+├── public/favicon.svg         应用图标
+├── src/
+│   ├── main.tsx               账号界面、笔记管理、编辑器、保存与冲突处理
+│   └── style.css              页面布局及正文排版
+├── server/index.ts            API、认证、SQLite 建表及数据访问
+├── tests/
+│   ├── api.test.mjs            隔离的后端接口测试
+│   ├── docker-config-check.mjs Docker 配置静态检查
+│   ├── e2e-public.mjs          指定地址的端到端接口检查
+│   ├── cdp-helper.mjs          浏览器 CDP 公共助手
+│   └── browser-*.mjs           界面交互回归脚本
+├── Dockerfile                 多阶段镜像构建
+├── docker-compose.yml         HTTP 部署配置
+├── docker-compose.prod.yml    HTTPS 反向代理覆盖配置
+├── package-lock.json          npm 依赖锁文件
+└── vite.config.ts             前端构建及开发代理
+```
+
+`node_modules/`、`data/`、`dist/` 和 `dist-server/` 均由运行或构建生成，并已加入 `.gitignore`。
+
+## 检查与测试
+
+```bash
+npm run lint
+npm run build
+npm run test:api
+npm run test:docker
+```
+
+API 测试会启动独立服务并使用临时数据库，覆盖认证、富文本校验、笔记与文件夹操作、版本冲突、用户隔离和 Origin 校验。Docker 检查属于静态校验，不代表实际镜像已经构建或容器已经运行。
+
+对指定的测试环境执行端到端接口检查（会注册测试账号并写入测试数据）：
+
+```bash
+# Bash
+BASE=http://127.0.0.1:3000 npm run test:e2e
+```
+
+```powershell
+# PowerShell
+$env:BASE = 'http://127.0.0.1:3000'
+npm run test:e2e
+```
+
+不要省略 `BASE`：脚本默认指向已有的公网部署实例。需要代理时另设 `PROXY`。
+
+浏览器回归使用 Edge／Chrome 的 CDP 接口。需先以远程调试端口启动专用测试浏览器，再运行脚本；脚本可能关闭该浏览器，并创建或修改测试账号数据。
+
+```powershell
+$env:CDP_PORT = '9334'
+$env:APP_URL = 'http://127.0.0.1:3000/'
+node tests/browser-public-check.mjs
+```
+
+远程调试端口需与浏览器启动参数一致。`browser-public-check.mjs` 覆盖页面挂载、登录注册、三栏布局、文件夹操作、富文本编辑、自动保存、搜索及运行时错误检查。其他 `browser-*.mjs` 脚本用于更细的交互回归。
+
+## 安全设计与适用范围
+
+- 密码使用 Argon2id 哈希；随机 Session 令牌哈希入库，Cookie 使用 HttpOnly 与 SameSite，默认 7 天过期，HTTPS 下可额外启用 Secure 和 `__Host-` 前缀。
+- SQL 使用参数化查询，所有资源操作都校验当前用户归属；写请求校验来源，正文有大小限制和结构校验。
+- 富文本 JSON 只允许支持的节点及标记，并校验链接；数据库与依赖目录不进入版本库。
+- SQLite 需要持久化磁盘，当前适合单实例、个人或小规模使用。当前版本不提供离线编辑与实时协作；其他设备的变更可通过刷新页面重新加载，版本冲突在保存时检测。
+- 限流按 TCP 对端 IP 统计，不信任 `X-Forwarded-For`。经过反向代理或部分 Docker 网络拓扑时，多个用户可能共享额度：普通 API 每分钟 180 次，登录／注册每 15 分钟 10 次。多人部署时需要结合可信代理设计调整。
+
+## 常见问题
+
+### 安装时提示找不到 Python 或 C++ 编译工具
+
+`better-sqlite3` 是原生模块，某些安装环境会触发 node-gyp。可补齐 Python 3 与对应平台的 C++ 工具链，或使用已配置工具链的 Docker 构建。
+
+本次 Windows x64、Node.js 24 环境中，锁定版本随包提供的预编译模块可直接运行。若遇到相同编译问题，可尝试以下方式并验证模块加载；`--ignore-scripts` 会跳过所有依赖安装脚本，不作为其他平台或后续版本的通用保证：
+
+```bash
+npm ci --ignore-scripts
+node -e "const D=require('better-sqlite3');const db=new D(':memory:');console.log(db.prepare('select 1 as ok').get());db.close();require('@node-rs/argon2')"
+npm run build
+```
+
+### 登录成功后立刻返回登录页
+
+检查是否通过 HTTP 访问却启用了安全 Cookie。HTTP 使用 `SECURE_COOKIES=false`；HTTPS 反向代理环境使用 `true`。检查浏览器是否接受会话 Cookie。
+
+### 新建或保存时返回 403
+
+检查 `PUBLIC_ORIGIN` 是否与页面实际来源一致，以及反向代理是否改写了 Host。开发时使用 Vite 的 `/api` 代理保持浏览器请求同源。
+
+### 只有前端页面，接口不可用
+
+`npm run dev` 只启动 Vite，需另一个终端执行 `npm start`。直接由后端提供页面时，先执行 `npm run build`；前端代码修改后也需重新构建。
+
+### 连续登录或运行测试返回 429
+
+当前 IP 的限流额度已用完，请等待窗口恢复；共享代理出口时额度可能由多名用户共同消耗。端到端检查建议在独立测试实例中运行。
+
+### Linux 容器缺少 Rollup 或 Argon2 平台模块
+
+保留完整的 `package-lock.json`。变更依赖后通过完整安装更新锁文件，并执行 `npm run test:docker` 检查跨平台可选依赖；避免提交只包含当前平台依赖的不完整锁文件。
