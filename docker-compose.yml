@@ -23,6 +23,9 @@ services:
       # 留空 = 按 Host 头比对 Origin。反向代理改写 Host 时填公网地址，
       # 例如 https://note.example.com，否则写操作会全部 403。
       PUBLIC_ORIGIN: ""
+      # 可选：仅列出受信任代理的实际 TCP 对端 IP，允许其传入 CF-Connecting-IP。
+      # 不要填写公网客户端地址或任意来源；留空时不信任转发头。
+      TRUSTED_PROXY_IPS: ""
     volumes:
       # 具名卷跨平台最省事，Docker 会按镜像里的属主初始化目录。
       - notes-data:/data

@@ -10,7 +10,7 @@
     "build": "tsc -b && vite build && tsc -p tsconfig.server.json",
     "build:server": "tsc -p tsconfig.server.json",
     "typecheck": "tsc -b",
-    "test:api": "node tests/api.test.mjs",
+    "test:api": "node --test tests/api.test.mjs tests/management.test.mjs",
     "test:docker": "node tests/docker-config-check.mjs",
     "test:e2e": "node tests/e2e-public.mjs",
     "lint": "oxlint",
@@ -18,6 +18,8 @@
   },
   "dependencies": {
     "@arco-design/web-react": "^2.66.18",
+    "@dicebear/core": "10.7.0",
+    "@dicebear/styles": "10.6.0",
     "@hono/node-server": "^2.1.5",
     "@node-rs/argon2": "^2.2.2",
     "@tiptap/extension-task-item": "^2.27.3",

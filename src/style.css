@@ -1,7 +1,8 @@
 /* 备忘录 · 仅保留布局与必要排版，视觉样式全部来自 Arco Design 原生组件与设计令牌 */
 
 *{box-sizing:border-box}
-html,body,#root{height:100%;margin:0}
+html,body,#root{height:100%;margin:0;min-width:0}
+body{overflow:hidden}
 
 /* Arco 的 .arco-btn-icon-only 虽声明了 flex 居中，但本项目实际加载到的规则里
    没有生效（计算值 display:inline-block / align-items:normal），图标会贴到按钮
@@ -18,31 +19,65 @@ html,body,#root{height:100%;margin:0}
 .auth-switch{display:flex;align-items:center;justify-content:center;gap:4px;margin-top:12px}
 
 /* ---------- 三栏布局 ---------- */
-.app-shell{height:100%;display:grid;grid-template-columns:220px 320px 1fr;min-height:0}
+.app-shell{height:100%;height:100dvh;display:grid;grid-template-columns:220px minmax(0,320px) minmax(0,1fr);min-height:0;min-width:0}
 .sidebar{display:flex;flex-direction:column;border-right:1px solid var(--color-border-2);padding:12px 8px;overflow-y:auto;min-height:0}
 .sidebar-brand{display:flex;align-items:center;gap:8px;padding:2px 8px 12px}
 .sidebar-footer{margin-top:auto;padding-top:8px}
-.user-row{display:flex;align-items:center;gap:8px;padding:6px 8px}
-.user-meta{flex:1;min-width:0;line-height:1.3;overflow:hidden}
+.user-row{display:flex;align-items:center;gap:10px;width:100%;min-width:0;padding:10px 8px;border:0;border-radius:var(--border-radius-small);background:transparent;color:var(--color-text-1);font:inherit;text-align:left;cursor:pointer}
+.user-row:hover,.user-row[aria-expanded="true"]{background:var(--color-fill-2)}
+.user-row:focus-visible{outline:2px solid rgb(var(--primary-6));outline-offset:2px}
+.user-row:disabled{cursor:not-allowed;opacity:.5}
+.user-row>.arco-avatar,.user-arrow{flex:none}
+.user-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.user-arrow{color:var(--color-text-3)}
+.account-menu{width:240px;max-width:calc(100vw - 24px);padding:8px 0;background:var(--color-bg-popup);border:1px solid var(--color-border-2);border-radius:var(--border-radius-medium);box-shadow:0 8px 32px rgba(0,0,0,.12);color:var(--color-text-1)}
+.account-menu-profile{display:flex;flex-direction:column;align-items:center;gap:12px;padding:20px 20px 24px}
+.account-menu-profile strong{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:16px}
+.account-menu-actions{padding:4px 8px}
+.account-menu-actions>button{display:flex;align-items:center;gap:12px;width:100%;padding:12px;border:0;border-radius:var(--border-radius-small);background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.account-menu-actions>button:hover,.account-menu-actions>button:focus-visible{background:var(--color-fill-2);outline:none}
+.account-menu-actions>button>svg{flex:none}
+.account-menu-signout{margin-top:8px;padding-top:8px;border-top:1px solid var(--color-border-2)}
 
-.note-list{display:flex;flex-direction:column;border-right:1px solid var(--color-border-2);min-height:0}
+.note-list{display:flex;flex-direction:column;border-right:1px solid var(--color-border-2);min-height:0;min-width:0}
 .note-list-head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px 6px}
+.list-heading{display:flex;align-items:center;gap:4px;min-width:0}
+.list-heading>div{min-width:0}
+.list-heading h6{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.note-list-head>.arco-space{flex:none}
+.mobile-nav-button{display:none}
+.note-more-menu{min-width:180px}
 /* 搜索框与卡片同在滚动容器内：吸顶固定，背景遮住下方卡片，宽度与卡片一致 */
 .note-search{position:sticky;top:0;z-index:1;background:var(--color-bg-2);padding-bottom:8px}
 /* Arco 的 .arco-list 自带 overflow-y:auto，会再长出一条 15px 滚动条，
    把卡片宽度压得比搜索框窄一圈；滚动统一交给外层 .list-scroll 负责 */
 .note-list .arco-list{overflow:visible}
-.list-scroll{flex:1;overflow-y:auto;padding:0 14px}
+.list-scroll{flex:1;overflow-y:auto;overflow-x:hidden;min-width:0;padding:0 14px}
 .note-card{cursor:pointer}
-.note-card-content{display:flex;flex-direction:column;gap:4px;width:100%}
+.note-card.arco-card-size-small>.arco-card-body{padding-left:8px}
+.note-context-menu{min-width:168px}
+.note-folder-option{display:flex;align-items:center;justify-content:space-between;gap:16px;max-width:240px}
+.note-folder-option>.ico-label{max-width:200px}
+.note-folder-option>svg{flex:none}
+.note-menu-danger:not(.arco-dropdown-menu-disabled){color:rgb(var(--danger-6))}
+.note-card-content:focus-visible{outline:2px solid rgb(var(--primary-6));outline-offset:2px}
+.note-card-row{display:flex;align-items:center;gap:14px;min-width:0}
+.note-card-row>span{flex:none}
+.note-card-content{display:flex;flex-direction:column;gap:4px;width:100%;min-width:0}
 .note-card-head{display:flex;align-items:center;gap:4px;min-width:0}
 .note-card-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.note-card-desc{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.note-card-desc{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.note-list .arco-list-content,.note-list .arco-list-item,.note-list .arco-list-item-content,.note-list .arco-card-body{min-width:0}
 .list-empty{display:flex;flex-direction:column;align-items:center;gap:12px;padding:48px 0}
 
-.editor-pane{display:flex;flex-direction:column;min-height:0}
+.editor-pane{display:flex;flex-direction:column;min-height:0;min-width:0}
 .editor-header{display:flex;align-items:center;justify-content:space-between;padding:8px 14px;border-bottom:1px solid var(--color-border-2)}
-.format-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 14px;border-bottom:1px solid var(--color-border-2);overflow-x:auto}
+.editor-header>.arco-space:first-child{min-width:0;overflow:hidden}
+.editor-folder-name{display:block;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.editor-folder-select{width:130px}
+.format-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 14px;border-bottom:1px solid var(--color-border-2);min-width:0}
+.format-tools{overflow-x:auto;min-width:0;flex:1}
+.format-tools>.arco-space-item{flex:none}
 .save-status{flex:none;margin-left:auto}
 .back{display:none}
 .conflict-body{padding:8px 14px;border-bottom:1px solid var(--color-border-2)}
@@ -69,11 +104,21 @@ html,body,#root{height:100%;margin:0}
 .folder-item{display:flex;align-items:center;justify-content:space-between;gap:6px;width:100%;min-width:0}
 .folder-dots{opacity:0;flex:none}
 .folder-item:hover .folder-dots,.folder-dots:focus{opacity:1}
+.drawer-navigation{display:flex;flex-direction:column;min-height:100%;min-width:0}
+.drawer-navigation .folder-dots{opacity:1}
+.drawer-navigation .sidebar-footer{padding-top:24px}
+.account-form{display:flex;flex-direction:column;gap:12px;padding:8px 0}
+.user-avatar{flex:none;background:var(--color-fill-2)}
+.avatar-settings{display:flex;flex-direction:column;gap:18px;padding:8px 0}
+.avatar-preview{display:flex;flex-direction:column;align-items:center;gap:12px}
+.avatar-actions{display:flex;justify-content:center;gap:8px}
+.avatar-actions>.arco-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px}
 .boot{height:100%;display:flex;align-items:center;justify-content:center}
 
 /* ---------- Tiptap 正文基础排版 ---------- */
 .ProseMirror{outline:none;min-height:320px;font-size:14px;line-height:1.8;color:var(--color-text-1)}
 .ProseMirror p{margin:0}
+.ProseMirror{overflow-wrap:anywhere}
 .ProseMirror h2,.ProseMirror h3{margin:16px 0 4px}
 .ProseMirror ul,.ProseMirror ol{padding-left:24px;margin:4px 0}
 .ProseMirror blockquote{margin:8px 0;padding:2px 12px;border-left:3px solid var(--color-border-3);color:var(--color-text-3)}
@@ -86,19 +131,25 @@ ul[data-type="taskList"] li>label{flex:none;margin-top:3px}
 ul[data-type="taskList"] li>div{flex:1}
 ul[data-type="taskList"] input[type="checkbox"]{accent-color:var(--primary-6)}
 
-/* ---------- 窄屏逐层切换（仅布局） ---------- */
+/* ---------- 窄屏：抽屉导航，列表与编辑区逐层切换 ---------- */
 @media (max-width:900px){
-.app-shell{grid-template-columns:200px 1fr}
+.app-shell{grid-template-columns:minmax(0,1fr)}
+.sidebar{display:none}
+.mobile-nav-button{display:inline-flex}
 .editor-pane{display:none}
-.app-shell.mobile-edit{grid-template-columns:1fr}
-.app-shell.mobile-edit .sidebar,.app-shell.mobile-edit .note-list{display:none}
+.app-shell.mobile-edit .note-list{display:none}
 .app-shell.mobile-edit .editor-pane{display:flex}
 .back{display:inline-flex}
 .folder-dots{opacity:1}
+.note-list-head{padding-top:max(12px,env(safe-area-inset-top))}
+.editor-footer{padding-bottom:max(6px,env(safe-area-inset-bottom))}
 }
 @media (max-width:600px){
-.app-shell{grid-template-columns:1fr}
-.sidebar{display:none}
-.app-shell.mobile-edit .note-list{display:none}
 .document{padding:20px 20px 70px}
+.editor-header{padding:8px}
+.editor-folder-name{max-width:72px}
+.editor-folder-select{width:104px}
+.format-bar{padding:6px 8px;gap:4px}
+.editor-header>.arco-space:last-child{flex:none}
+.auth-page{overflow-y:auto}
 }

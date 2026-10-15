@@ -2,6 +2,7 @@ import { randomBytes, randomUUID, createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isIP } from 'node:net';
 import Database from 'better-sqlite3';
 import { Algorithm, hash, verify } from '@node-rs/argon2';
 import { serve } from '@hono/node-server';
@@ -24,13 +25,17 @@ const secureCookies = process.env.SECURE_COOKIES
 // 反向代理（Cloudflare Tunnel / Nginx）可能改写 Host，届时按 Host 比对会把正常的写操作
 // 误判成跨站请求。配了 PUBLIC_ORIGIN 就以它为唯一白名单，既更稳也更严格。
 const publicOrigin = (process.env.PUBLIC_ORIGIN ?? '').trim().replace(/\/+$/, '');
+// 仅当 TCP 对端在显式白名单内时，才接受 Cloudflare 的客户端 IP。
+const normalizeIp = (value: string) => value.toLowerCase().startsWith('::ffff:') && isIP(value.slice(7)) === 4 ? value.slice(7) : value.toLowerCase();
+const trustedProxyIps = new Set((process.env.TRUSTED_PROXY_IPS ?? '').split(',').map(value => normalizeIp(value.trim())).filter(Boolean));
+if ([...trustedProxyIps].some(value => !isIP(value))) throw new Error('TRUSTED_PROXY_IPS 必须是逗号分隔的代理 IP 地址');
 const COOKIE_NAME = secureCookies ? '__Host-notes_session' : 'notes_session';
 const MAX_BODY_BYTES = 1024 * 1024;
 const MAX_CONTENT_BYTES = 512 * 1024;
 const MAX_TEXT_LENGTH = 200_000;
 const passwordOptions = { algorithm: Algorithm.Argon2id, memoryCost: 19_456, timeCost: 2, parallelism: 1 };
 
-type User = { id: string; username: string };
+type User = { id: string; username: string; avatarStyle: string; avatarSeed: string };
 type JsonObject = Record<string, unknown>;
 type AppEnv = { Variables: { user: User | undefined; sessionHash: string | undefined } };
 type AppContext = Context<AppEnv>;
@@ -262,6 +267,11 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires_at);
   CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id);
+  CREATE TABLE IF NOT EXISTS user_avatars (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    style TEXT NOT NULL,
+    seed TEXT NOT NULL
+  );
   CREATE TABLE IF NOT EXISTS folders (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -301,6 +311,14 @@ function noteFromRow(row: NoteRow): Note {
   };
 }
 const selectNote = db.prepare('SELECT * FROM notes WHERE id = ? AND user_id = ?');
+// 独立配置表兼容现有数据库；旧账号无需改写即可得到稳定的默认头像。
+const publicUserColumns = `users.id, users.username,
+  'cutouts' AS avatarStyle,
+  COALESCE(user_avatars.seed, users.id) AS avatarSeed`;
+function publicUser(id: string): User {
+  return db.prepare(`SELECT ${publicUserColumns} FROM users
+    LEFT JOIN user_avatars ON user_avatars.user_id = users.id WHERE users.id = ?`).get(id) as User;
+}
 function ownedNote(id: string, userId: string): NoteRow {
   const row = selectNote.get(id, userId) as NoteRow | undefined;
   if (!row) throw new ApiError(404, '笔记不存在');
@@ -376,13 +394,33 @@ app.use('*', async (c, next) => {
   c.header('X-Frame-Options', 'DENY');
   await next();
 });
+// 先解析会话，已登录用户的 API 额度按账号隔离。
+app.use('/api/*', async (c, next) => {
+  const token = getCookie(c, COOKIE_NAME);
+  if (token && /^[A-Za-z0-9_-]{43}$/.test(token)) {
+    const digest = tokenHash(token);
+    const user = db.prepare(`
+      SELECT ${publicUserColumns} FROM sessions
+      JOIN users ON users.id = sessions.user_id
+      LEFT JOIN user_avatars ON user_avatars.user_id = users.id
+      WHERE sessions.token_hash = ? AND sessions.expires_at > ?
+    `).get(digest, Date.now()) as User | undefined;
+    if (user) { c.set('user', user); c.set('sessionHash', digest); }
+  }
+  await next();
+});
 app.use('/api/*', async (c, next) => {
   c.header('Cache-Control', 'no-store');
-  // 只信任实际 TCP 对端，不信任可伪造的 X-Forwarded-For。
-  const ip = getConnInfo(c).remote.address ?? 'unknown';
-  let retry = takeRateLimit(`api:${ip}`, 180, 60_000);
+  const peer = normalizeIp(getConnInfo(c).remote.address ?? 'unknown');
+  const forwarded = c.req.header('cf-connecting-ip')?.trim();
+  const ip = trustedProxyIps.has(peer) && forwarded && isIP(forwarded) ? normalizeIp(forwarded) : peer;
+  const user = c.get('user');
+  let retry = takeRateLimit(user ? `api-user:${user.id}` : `api-ip:${ip}`, 180, 60_000);
   if (c.req.method === 'POST' && (c.req.path === '/api/auth/login' || c.req.path === '/api/auth/register')) {
-    retry = Math.max(retry, takeRateLimit(`auth:${ip}`, 10, 15 * 60_000));
+    retry = Math.max(retry, takeRateLimit(`auth-ip:${ip}`, 60, 15 * 60_000));
+  }
+  if (user && c.req.method === 'POST' && ['/api/auth/password', '/api/auth/logout-others'].includes(c.req.path)) {
+    retry = Math.max(retry, takeRateLimit(`account:${user.id}`, 10, 15 * 60_000));
   }
   if (retry) {
     c.header('Retry-After', String(retry));
@@ -406,19 +444,6 @@ app.use('/api/*', async (c, next) => {
   await next();
 });
 app.use('/api/*', bodyLimit({ maxSize: MAX_BODY_BYTES, onError: (c) => c.json({ error: '请求正文不能超过 1 MiB' }, 413) }));
-app.use('/api/*', async (c, next) => {
-  const token = getCookie(c, COOKIE_NAME);
-  if (token && /^[A-Za-z0-9_-]{43}$/.test(token)) {
-    const digest = tokenHash(token);
-    const user = db.prepare(`
-      SELECT users.id, users.username FROM sessions
-      JOIN users ON users.id = sessions.user_id
-      WHERE sessions.token_hash = ? AND sessions.expires_at > ?
-    `).get(digest, Date.now()) as User | undefined;
-    if (user) { c.set('user', user); c.set('sessionHash', digest); }
-  }
-  await next();
-});
 const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
   if (!c.get('user')) {
     clearSessionCookie(c);
@@ -432,7 +457,8 @@ app.get('/api/health', (c) => c.json({ ok: true, uptime: Math.round(process.upti
 
 app.post('/api/auth/register', async (c) => {
   const { username, usernameKey, password } = credentials(await readBody(c, ['username', 'password']));
-  const user: User = { id: randomUUID(), username };
+  const id = randomUUID();
+  const user: User = { id, username, avatarStyle: 'cutouts', avatarSeed: id };
   const passwordHash = await passwordJob(() => hash(password, passwordOptions));
   const session = newSession();
   const createUser = db.transaction(() => {
@@ -452,23 +478,94 @@ app.post('/api/auth/register', async (c) => {
 });
 app.post('/api/auth/login', async (c) => {
   const { usernameKey, password } = credentials(await readBody(c, ['username', 'password']));
-  const row = db.prepare('SELECT id, username, password_hash FROM users WHERE username_key = ?').get(usernameKey) as (User & { password_hash: string }) | undefined;
+  const retry = takeRateLimit(`login-account:${tokenHash(usernameKey)}`, 10, 15 * 60_000);
+  if (retry) {
+    c.header('Retry-After', String(retry));
+    return c.json({ error: '该账号的登录尝试过于频繁，请稍后重试' }, 429);
+  }
+  const row = db.prepare('SELECT id, username, password_hash FROM users WHERE username_key = ?').get(usernameKey) as { id: string; username: string; password_hash: string } | undefined;
   // 不存在的用户名也做 Argon2 校验，避免快速返回暴露账号是否存在。
   const matches = await passwordJob(async () => verify(row?.password_hash ?? await dummyPasswordHash, password));
   if (!row || !matches) throw new ApiError(401, '用户名或密码错误');
-  const user: User = { id: row.id, username: row.username };
+  const user = publicUser(row.id);
   const session = newSession();
-  db.transaction(() => replaceSession(c, user.id, session))();
+  db.transaction(() => {
+    const current = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(user.id) as { password_hash: string };
+    if (current.password_hash !== row.password_hash) throw new ApiError(401, '密码已发生变化，请重新登录');
+    replaceSession(c, user.id, session);
+  })();
   sessionCookie(c, session.token);
   return c.json({ user });
 });
 app.get('/api/auth/me', requireAuth, (c) => c.json({ user: c.get('user')! }));
+app.patch('/api/auth/avatar', requireAuth, async c => {
+  const body = await readBody(c, ['avatarStyle', 'avatarSeed']);
+  if (body.avatarStyle !== 'cutouts') invalid('头像仅支持 Cutouts 风格');
+  if (typeof body.avatarSeed !== 'string' || !/^[a-zA-Z0-9_-]{1,80}$/.test(body.avatarSeed)) invalid('头像标识须为 1 至 80 位字母、数字、下划线或连字符');
+  requireLiveSession(c);
+  const userId = c.get('user')!.id;
+  db.prepare(`INSERT INTO user_avatars (user_id, style, seed) VALUES (?, ?, ?)
+    ON CONFLICT(user_id) DO UPDATE SET style = excluded.style, seed = excluded.seed`)
+    .run(userId, body.avatarStyle, body.avatarSeed);
+  return c.json({ user: publicUser(userId) });
+});
 app.post('/api/auth/logout', (c) => {
   const user = c.get('user');
   const digest = c.get('sessionHash');
   if (user && digest) db.prepare('DELETE FROM sessions WHERE token_hash = ? AND user_id = ?').run(digest, user.id);
   clearSessionCookie(c);
   return c.json({ ok: true });
+});
+
+function requireLiveSession(c: AppContext) {
+  const live = db.prepare('SELECT 1 FROM sessions WHERE token_hash = ? AND user_id = ? AND expires_at > ?')
+    .get(c.get('sessionHash'), c.get('user')!.id, Date.now());
+  if (!live) throw new ApiError(401, '登录已失效，请重新登录');
+}
+
+async function verifyCurrentPassword(c: AppContext, value: unknown) {
+  if (typeof value !== 'string' || value.length < 8 || value.length > 128) invalid('请输入正确的当前密码');
+  const row = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(c.get('user')!.id) as { password_hash: string };
+  const matches = await passwordJob(() => verify(row.password_hash, value));
+  if (!matches) throw new ApiError(400, '当前密码不正确');
+  return row.password_hash;
+}
+
+app.get('/api/auth/sessions', requireAuth, c => {
+  const row = db.prepare('SELECT COUNT(*) AS count FROM sessions WHERE user_id = ? AND expires_at > ? AND token_hash != ?')
+    .get(c.get('user')!.id, Date.now(), c.get('sessionHash')) as { count: number };
+  return c.json({ otherSessions: row.count });
+});
+
+app.post('/api/auth/password', requireAuth, async c => {
+  const body = await readBody(c, ['currentPassword', 'newPassword']);
+  if (typeof body.newPassword !== 'string' || body.newPassword.length < 8 || body.newPassword.length > 128) invalid('新密码长度须为 8 至 128 个字符');
+  if (body.currentPassword === body.newPassword) invalid('新密码不能与当前密码相同');
+  const previousHash = await verifyCurrentPassword(c, body.currentPassword);
+  const nextHash = await passwordJob(() => hash(body.newPassword as string, passwordOptions));
+  const session = newSession();
+  db.transaction(() => {
+    requireLiveSession(c);
+    // 校验与写入之间密码可能已被其他设备修改，不能用旧校验结果覆盖新密码。
+    const changed = db.prepare('UPDATE users SET password_hash = ? WHERE id = ? AND password_hash = ?')
+      .run(nextHash, c.get('user')!.id, previousHash);
+    if (!changed.changes) throw new ApiError(409, '密码已发生变化，请重新登录后操作');
+    db.prepare('DELETE FROM sessions WHERE user_id = ?').run(c.get('user')!.id);
+    replaceSession(c, c.get('user')!.id, session);
+  })();
+  sessionCookie(c, session.token);
+  return c.json({ ok: true });
+});
+
+app.post('/api/auth/logout-others', requireAuth, async c => {
+  const body = await readBody(c, ['currentPassword']);
+  await verifyCurrentPassword(c, body.currentPassword);
+  const result = db.transaction(() => {
+    requireLiveSession(c);
+    return db.prepare('DELETE FROM sessions WHERE user_id = ? AND token_hash != ?')
+      .run(c.get('user')!.id, c.get('sessionHash'));
+  })();
+  return c.json({ ok: true, revokedSessions: result.changes });
 });
 
 app.use('/api/folders', requireAuth);
@@ -525,6 +622,40 @@ app.post('/api/notes', async (c) => {
     return noteFromRow(ownedNote(id, userId));
   })();
   return c.json({ note }, 201);
+});
+
+app.post('/api/notes/batch', async c => {
+  const body = await readBody(c, ['operation', 'notes', 'folderId']);
+  if (typeof body.operation !== 'string' || !['move', 'trash', 'restore'].includes(body.operation)) invalid('不支持的批量操作');
+  if (!Array.isArray(body.notes) || !body.notes.length || body.notes.length > 100) invalid('每次须选择 1 至 100 篇笔记');
+  const items = body.notes.map(value => {
+    if (!isObject(value)) invalid('笔记参数格式不正确');
+    onlyKeys(value, ['id', 'version'], '笔记参数包含不支持的字段');
+    if (!validId(value.id) || !Number.isSafeInteger(value.version) || Number(value.version) < 1 || Number(value.version) >= Number.MAX_SAFE_INTEGER) invalid('笔记编号或版本不正确');
+    return { id: value.id, version: Number(value.version) };
+  });
+  if (new Set(items.map(item => item.id)).size !== items.length) invalid('不能重复选择同一篇笔记');
+  if (body.operation !== 'move' && has(body, 'folderId')) invalid('只有移动操作可以指定文件夹');
+  const folderId = body.operation === 'move' ? validateFolderId(body.folderId) : null;
+  const userId = c.get('user')!.id;
+  const result = db.transaction(() => {
+    // 所有归属与版本先检查，再一次性写入；任何一篇失败都不会留下部分结果。
+    const rows = items.map(item => ownedNote(item.id, userId));
+    if (folderId !== null) ownedFolder(folderId, userId);
+    if (rows.some((row, index) => row.version !== items[index].version)) return { conflict: true as const, notes: rows.map(noteFromRow) };
+    if (rows.some(row => body.operation === 'restore' ? row.deleted_at === null : row.deleted_at !== null)) invalid('所选笔记的删除状态已变化，请刷新后重试');
+    const deletedAt = body.operation === 'trash' ? new Date().toISOString() : null;
+    for (const row of rows) {
+      if (body.operation === 'move') {
+        if (row.folder_id !== folderId) db.prepare('UPDATE notes SET folder_id = ?, version = version + 1 WHERE id = ? AND user_id = ?').run(folderId, row.id, userId);
+      } else {
+        db.prepare('UPDATE notes SET deleted_at = ?, version = version + 1 WHERE id = ? AND user_id = ?').run(deletedAt, row.id, userId);
+      }
+    }
+    return { conflict: false as const, notes: rows.map(row => noteFromRow(ownedNote(row.id, userId))) };
+  })();
+  if (result.conflict) return c.json({ error: '部分笔记已被其他设备修改，本次批量操作未执行，请刷新后重选', notes: result.notes }, 409);
+  return c.json({ notes: result.notes });
 });
 app.patch('/api/notes/:id', async (c) => {
   const id = routeId(c);

@@ -53,7 +53,8 @@ ENV NODE_ENV=production \
     PORT=3000 \
     DATA_DIR=/data \
     SECURE_COOKIES=false \
-    PUBLIC_ORIGIN=""
+    PUBLIC_ORIGIN="" \
+    TRUSTED_PROXY_IPS=""
 
 WORKDIR /app
 
