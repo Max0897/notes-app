@@ -16,7 +16,15 @@ const production = process.env.NODE_ENV === 'production';
 const dataDir = process.env.DATA_DIR ? resolve(process.env.DATA_DIR) : resolve(projectRoot, 'data');
 const distDir = resolve(projectRoot, 'dist');
 const SESSION_TTL = 7 * 24 * 60 * 60 * 1000;
-const COOKIE_NAME = production ? '__Host-notes_session' : 'notes_session';
+// 容器里通常只跑 HTTP，由前置反向代理终止 TLS。此时若跟着 NODE_ENV 下发 Secure Cookie，
+// 浏览器会静默丢弃它 —— 表现为「登录成功但立刻掉线」。所以允许用 SECURE_COOKIES 显式覆盖。
+const secureCookies = process.env.SECURE_COOKIES
+  ? process.env.SECURE_COOKIES === 'true'
+  : production;
+// 反向代理（Cloudflare Tunnel / Nginx）可能改写 Host，届时按 Host 比对会把正常的写操作
+// 误判成跨站请求。配了 PUBLIC_ORIGIN 就以它为唯一白名单，既更稳也更严格。
+const publicOrigin = (process.env.PUBLIC_ORIGIN ?? '').trim().replace(/\/+$/, '');
+const COOKIE_NAME = secureCookies ? '__Host-notes_session' : 'notes_session';
 const MAX_BODY_BYTES = 1024 * 1024;
 const MAX_CONTENT_BYTES = 512 * 1024;
 const MAX_TEXT_LENGTH = 200_000;
@@ -316,12 +324,12 @@ function newSession() {
 }
 function sessionCookie(c: AppContext, token: string) {
   setCookie(c, COOKIE_NAME, token, {
-    httpOnly: true, sameSite: 'Lax', secure: production, path: '/', maxAge: SESSION_TTL / 1000,
+    httpOnly: true, sameSite: 'Lax', secure: secureCookies, path: '/', maxAge: SESSION_TTL / 1000,
     expires: new Date(Date.now() + SESSION_TTL),
   });
 }
 function clearSessionCookie(c: AppContext) {
-  deleteCookie(c, COOKIE_NAME, { path: '/', httpOnly: true, sameSite: 'Lax', secure: production });
+  deleteCookie(c, COOKIE_NAME, { path: '/', httpOnly: true, sameSite: 'Lax', secure: secureCookies });
 }
 function replaceSession(c: AppContext, userId: string, session: ReturnType<typeof newSession>) {
   const oldDigest = c.get('sessionHash');
@@ -387,9 +395,10 @@ app.use('/api/*', async (c, next) => {
     try {
       if (origin && host) {
         const url = new URL(origin);
-        sameOrigin = ['http:', 'https:'].includes(url.protocol)
-          && url.host.toLowerCase() === host.toLowerCase()
+        const wellFormed = ['http:', 'https:'].includes(url.protocol)
           && url.origin === origin && !url.username && !url.password;
+        sameOrigin = wellFormed
+          && (publicOrigin ? origin === publicOrigin : url.host.toLowerCase() === host.toLowerCase());
       }
     } catch { /* 无效的 Origin 按跨站请求拒绝。 */ }
     if (!sameOrigin) return c.json({ error: '写操作必须来自同源页面，Origin 须与 Host 一致' }, 403);
@@ -417,6 +426,9 @@ const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
   }
   await next();
 };
+
+// 健康检查：容器编排用它判断实例是否存活，不要求登录。
+app.get('/api/health', (c) => c.json({ ok: true, uptime: Math.round(process.uptime()) }));
 
 app.post('/api/auth/register', async (c) => {
   const { username, usernameKey, password } = credentials(await readBody(c, ['username', 'password']));

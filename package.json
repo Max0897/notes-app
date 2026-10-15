@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite --host localhost",
     "start": "tsx server/index.ts",
-    "build": "tsc -b && vite build",
+    "start:prod": "node dist-server/index.js",
+    "build": "tsc -b && vite build && tsc -p tsconfig.server.json",
+    "build:server": "tsc -p tsconfig.server.json",
     "typecheck": "tsc -b",
     "test:api": "node tests/api.test.mjs",
     "lint": "oxlint",

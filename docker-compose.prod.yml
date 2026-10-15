@@ -1,0 +1,20 @@
+# 生产环境覆盖配置：面向「公网 HTTPS + 反向代理（Cloudflare Tunnel / Nginx）」的部署。
+#
+# 用法：
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# 和基础配置的区别：
+#   - 只监听回环地址，公网入口交给隧道/反向代理，容器不直接暴露
+#   - 宿主端口 3100（改这里的话记得同步改隧道配置里的 service 地址）
+#   - 页面走 HTTPS，因此开启 Secure Cookie，并固定 Origin 白名单
+services:
+  notes-app:
+    # Compose 对 ports 这类多值字段默认是「拼接」而不是「替换」，
+    # 不加 !override 的话基础配置里的 3000:3000 依然生效，会撞端口。
+    # 用 !reset 则会连新值一起清空，所以只能用 !override。
+    ports: !override
+      - "127.0.0.1:3100:3000"
+    environment:
+      SECURE_COOKIES: "true"
+      PUBLIC_ORIGIN: "https://note.idrama.men"
+    restart: always

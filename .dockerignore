@@ -1,0 +1,31 @@
+# 依赖与构建产物在镜像内重新生成，不要从宿主机带进去
+node_modules
+dist
+dist-server
+.cache
+
+# 运行时数据：数据库和会话都存在这里，绝不能打进镜像
+data
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
+# 版本控制、编辑器、工作区元数据
+.git
+.gitignore
+.gitattributes
+.vscode
+.idea
+.workbuddy
+.DS_Store
+
+# 测试只在宿主机跑，不进镜像
+tests
+
+# 本地环境与日志
+logs
+*.log
+.env
+.env.*
+*.local
