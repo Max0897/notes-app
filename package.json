@@ -11,6 +11,8 @@
     "build:server": "tsc -p tsconfig.server.json",
     "typecheck": "tsc -b",
     "test:api": "node tests/api.test.mjs",
+    "test:docker": "node tests/docker-config-check.mjs",
+    "test:e2e": "node tests/e2e-public.mjs",
     "lint": "oxlint",
     "preview": "vite preview --host localhost"
   },

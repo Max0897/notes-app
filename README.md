@@ -185,6 +185,7 @@ server/
   index.ts          Hono 服务：认证、文件夹、笔记 CRUD、SQLite 建表与迁移
 tests/
   api.test.mjs                 后端接口自动化测试（Node 内置 test runner）
+  e2e-public.mjs               对线上地址跑的端到端接口检查（86 项）
   cdp-helper.mjs               浏览器测试公共助手（Edge 无头 + CDP）
   browser-*.mjs                界面交互真实回归
   diagnose-order.mjs           排查「保存 / 列表顺序」类问题的诊断脚本
@@ -215,14 +216,28 @@ docker-compose.yml
 
 ```bash
 yarn test:api                       # 45 项接口检查：注册登录、富文本校验、版本冲突、用户隔离、软删/恢复、Origin 校验
-node tests/docker-config-check.mjs  # Docker 配置静态检查（需先 yarn build）
+yarn test:docker                    # Docker 配置静态检查（需先 yarn build）
+```
+
+**线上端到端检查**（86 项），直接对已部署的地址跑一遍真实用户流程：注册、Cookie 安全标志、文件夹与笔记 CRUD、版本冲突、软删/恢复、用户隔离、Origin 防护、登出。
+
+```bash
+BASE=https://note.example.com yarn test:e2e
+# 本机访问 Cloudflare 需要代理时：
+BASE=https://note.example.com PROXY=http://127.0.0.1:7897 yarn test:e2e
 ```
 
 界面回归需要本机有 Edge 或 Chrome，脚本会启动无头浏览器、固定桌面视口后执行真实点击与样式断言：
 
 ```bash
-CDP_PORT=9222 node tests/browser-click-check.mjs
+CDP_PORT=9222 node tests/browser-click-check.mjs      # 本地开发用
+# 线上构建产物（会真实注册/登录，账号已存在时自动改登录，可重复运行）
+CDP_PORT=9334 APP_URL=https://note.example.com/ node tests/browser-public-check.mjs
 ```
+
+`browser-public-check.mjs` 共 50 项，覆盖 React/Arco 是否真正挂载、三栏布局、侧栏加号可点击、文件夹三点菜单、卡片样式、Tiptap 编辑与自动保存、前端搜索过滤，以及「页面无 JS 运行时报错」。启动无头浏览器时可加 `--proxy-server=http://127.0.0.1:7897`。
+
+> 注意：服务端限流按 TCP 对端 IP 统计（不支持 `X-Forwarded-For`）。容器部署时所有外部请求来自同一网关地址，因此 `/api/auth/register|login` 的 10 次/15 分钟是**全局共享**的。连续跑多轮测试会触发 429，重启容器即可清空计数。
 
 ## 数据与备份
 
