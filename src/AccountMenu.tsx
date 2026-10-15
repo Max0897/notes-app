@@ -7,7 +7,7 @@ import {UserAvatar} from './UserAvatar';
 export function AccountMenu({user, disabled, onSettings, onLogout}: {
   user: User; disabled: boolean; onSettings: () => void; onLogout: () => void;
 }) {
-  const {username} = user;
+  const username = user.nickname || user.username;
   const [visible, setVisible] = useState(false);
   const [compact, setCompact] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);

@@ -14,6 +14,7 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import {initCollaboration, registerCollaboration} from './teams.js';
 import {initNotifications, registerNotifications} from './notifications.js';
 import {createRealtime} from './realtime.js';
+import {initNotebook, registerNotebook} from './notebook.js';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const production = process.env.NODE_ENV === 'production';
@@ -38,7 +39,7 @@ const MAX_CONTENT_BYTES = 512 * 1024;
 const MAX_TEXT_LENGTH = 200_000;
 const passwordOptions = { algorithm: Algorithm.Argon2id, memoryCost: 19_456, timeCost: 2, parallelism: 1 };
 
-type User = { id: string; username: string; avatarStyle: string; avatarSeed: string };
+type User = { id: string; username: string; nickname: string; avatarStyle: string; avatarSeed: string };
 export type JsonObject = Record<string, unknown>;
 export type AppEnv = { Variables: { user: User | undefined; sessionHash: string | undefined } };
 export type AppContext = Context<AppEnv>;
@@ -119,6 +120,14 @@ function folderName(value: unknown): string {
   }
   if (/[\u0000-\u001f\u007f]/u.test(value)) invalid('文件夹名称不能包含控制字符');
   return value.trim();
+}
+function nicknameValue(value: unknown, fallback: string): string {
+  if (value === undefined) return fallback;
+  if (typeof value !== 'string') invalid('请输入昵称');
+  const nickname = value.trim().normalize('NFC');
+  // oxlint-disable-next-line no-control-regex
+  if (!nickname || Array.from(nickname).length > 32 || /[\u0000-\u001f\u007f-\u009f]/u.test(nickname)) invalid('昵称须为 1 至 32 个字符，且不能包含控制字符');
+  return nickname;
 }
 function validId(value: unknown): value is string {
   return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
@@ -297,7 +306,9 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS notes_user_updated ON notes(user_id, updated_at DESC);
   CREATE INDEX IF NOT EXISTS notes_user_folder ON notes(user_id, folder_id);
 `);
+if (!(db.prepare('PRAGMA table_info(users)').all() as {name: string}[]).some(column => column.name === 'nickname')) db.exec("ALTER TABLE users ADD COLUMN nickname TEXT NOT NULL DEFAULT ''");
 const collaboration = initCollaboration(db);
+initNotebook(db);
 const realtime = createRealtime(db, {cookieName: COOKIE_NAME, publicOrigin, validateContent});
 initNotifications(db);
 collaboration.cleanup();
@@ -320,7 +331,7 @@ function noteFromRow(row: NoteRow): Note {
 }
 const selectNote = db.prepare('SELECT * FROM notes WHERE id = ? AND user_id = ? AND space_id = user_id');
 // 独立配置表兼容现有数据库；旧账号无需改写即可得到稳定的默认头像。
-const publicUserColumns = `users.id, users.username,
+const publicUserColumns = `users.id, users.username, COALESCE(NULLIF(users.nickname,''),users.username) AS nickname,
   'cutouts' AS avatarStyle,
   COALESCE(user_avatars.seed, users.id) AS avatarSeed`;
 function publicUser(id: string): User {
@@ -466,15 +477,18 @@ const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
 app.get('/api/health', (c) => c.json({ ok: true, uptime: Math.round(process.uptime()) }));
 
 app.post('/api/auth/register', async (c) => {
-  const { username, usernameKey, password } = credentials(await readBody(c, ['username', 'password']));
+  const body = await readBody(c, ['username', 'password', 'nickname']);
+  const { username, usernameKey, password } = credentials(body);
+  const nickname = nicknameValue(body.nickname, username);
   const id = randomUUID();
-  const user: User = { id, username, avatarStyle: 'cutouts', avatarSeed: id };
+  const user: User = { id, username, nickname, avatarStyle: 'cutouts', avatarSeed: id };
   const passwordHash = await passwordJob(() => hash(password, passwordOptions));
   const session = newSession();
   const createUser = db.transaction(() => {
     if (db.prepare('SELECT id FROM users WHERE username_key = ?').get(usernameKey)) throw new ApiError(409, '用户名已被使用');
     const now = new Date().toISOString();
     db.prepare('INSERT INTO users (id, username, username_key, password_hash, created_at) VALUES (?, ?, ?, ?, ?)').run(user.id, username, usernameKey, passwordHash, now);
+    db.prepare('UPDATE users SET nickname=? WHERE id=?').run(nickname, user.id);
     const folderId = randomUUID();
     db.prepare('INSERT INTO folders (id, user_id, name) VALUES (?, ?, ?)').run(folderId, user.id, '备忘录');
     const welcome = '欢迎使用记事本！你可以创建文件夹、编辑笔记、置顶重要内容，并在最近删除中恢复笔记。';
@@ -508,6 +522,14 @@ app.post('/api/auth/login', async (c) => {
   return c.json({ user });
 });
 app.get('/api/auth/me', requireAuth, (c) => c.json({ user: c.get('user')! }));
+app.patch('/api/auth/profile', requireAuth, async c => {
+  const body = await readBody(c, ['nickname']);
+  if (!has(body, 'nickname')) invalid('请输入昵称');
+  const nickname = nicknameValue(body.nickname, c.get('user')!.username);
+  requireLiveSession(c);
+  db.prepare('UPDATE users SET nickname=? WHERE id=?').run(nickname, c.get('user')!.id);
+  return c.json({user: publicUser(c.get('user')!.id)});
+});
 app.patch('/api/auth/avatar', requireAuth, async c => {
   const body = await readBody(c, ['avatarStyle', 'avatarSeed']);
   if (body.avatarStyle !== 'cutouts') invalid('头像仅支持 Cutouts 风格');
@@ -580,6 +602,7 @@ app.post('/api/auth/logout-others', requireAuth, async c => {
 
 registerCollaboration(app, db, {readBody, requireAuth, requireLiveSession, verifyCurrentPassword, validateContent, folderName, ApiError});
 registerNotifications(app, db, {readBody, requireAuth, requireLiveSession, ApiError});
+registerNotebook(app, db, {readBody, requireAuth, requireLiveSession, validateContent, ApiError, restore: realtime.restore});
 
 app.use('/api/folders', requireAuth);
 app.use('/api/folders/*', requireAuth);
@@ -623,6 +646,7 @@ app.get('/api/notes', (c) => {
   const rows = db.prepare('SELECT * FROM notes WHERE user_id = ? AND space_id = user_id ORDER BY updated_at DESC, id ASC').all(c.get('user')!.id) as NoteRow[];
   return c.json({ notes: rows.map(noteFromRow) });
 });
+app.get('/api/notes/:id', c => c.json({note: noteFromRow(ownedNote(routeId(c), c.get('user')!.id))}));
 app.post('/api/notes', async (c) => {
   const body = await readBody(c, ['folderId']);
   const folderId = validateFolderId(body.folderId);

@@ -72,7 +72,7 @@ export function TeamSettingsPage({team, user, onMenu, onChanged, onLeave}: {team
   const [inviteUsername, setInviteUsername] = useState(''), [inviteRole, setInviteRole] = useState<TeamRole>('viewer'), [inviteLink, setInviteLink] = useState('');
   const [folders, setFolders] = useState<Folder[]>([]), [folderId, setFolderId] = useState(''), [mode, setMode] = useState('team'), [grants, setGrants] = useState<Record<string, string>>({}), [affected, setAffected] = useState(0);
   const [activityNext, setActivityNext] = useState<number | null>(null);
-  const [activities, setActivities] = useState<{id: number; username: string; action: string; objectName: string; createdAt: string}[]>([]);
+  const [activities, setActivities] = useState<{id: number; username: string; action: string; objectName: string; nickname?: string; createdAt: string}[]>([]);
   const [dissolve, setDissolve] = useState(false), [confirmName, setConfirmName] = useState(''), [password, setPassword] = useState('');
   const [loading, setLoading] = useState(true); const {busy, run} = useTask(); const manage = isManager(team);
   async function refresh() {
@@ -99,7 +99,7 @@ export function TeamSettingsPage({team, user, onMenu, onChanged, onLeave}: {team
       <Spin loading={loading} style={{display: 'block', minWidth: 0}}><Tabs className="settings-tabs" defaultActiveTab="info" overflow="scroll">
         <Tabs.TabPane key="info" title="基本信息">
           <form className="account-form" onSubmit={event => { event.preventDefault(); void run(async () => { await teamApi(team.id, '', 'PATCH', {name, description}); await onChanged(); Message.success('团队信息已更新'); }); }}>
-            <Text type="secondary">你是{roleNames[team.role]} · {members.length} 位成员 · 所有者 {members.find(m => m.role === 'owner')?.username} · 创建于 {date(team.createdAt)}</Text>
+            <Text type="secondary">你是{roleNames[team.role]} · {members.length} 位成员 · 所有者 {(members.find(m => m.role === 'owner')?.nickname || members.find(m => m.role === 'owner')?.username)} · 创建于 {date(team.createdAt)}</Text>
             <Input aria-label="团队名称" placeholder="团队名称（2–40 字）" maxLength={40} value={name} onChange={setName} disabled={!manage || busy}/>
             <Input.TextArea aria-label="团队简介" placeholder="团队简介（最多 200 字）" maxLength={200} value={description} onChange={setDescription} disabled={!manage || busy}/>
             {manage && <Button type="primary" htmlType="submit" loading={busy}>保存团队信息</Button>}
@@ -110,8 +110,8 @@ export function TeamSettingsPage({team, user, onMenu, onChanged, onLeave}: {team
         </Tabs.TabPane>
         <Tabs.TabPane key="members" title="成员">
           <Input allowClear aria-label="搜索成员" placeholder="搜索成员" value={memberSearch} onChange={setMemberSearch}/>
-          {members.filter(m => m.username.toLowerCase().includes(memberSearch.toLowerCase())).map(member => <div key={member.id} className="team-member-row">
-            <UserAvatar user={member}/><div className="team-member-info"><Text bold>{member.username}{member.id === user.id ? '（你）' : ''}</Text><Text type="secondary">{date(member.joinedAt)}加入</Text></div>
+          {members.filter(m => (m.username + ' ' + m.nickname).toLowerCase().includes(memberSearch.toLowerCase())).map(member => <div key={member.id} className="team-member-row">
+            <UserAvatar user={member}/><div className="team-member-info"><Text bold>{member.nickname || member.username}{member.id === user.id ? '（你）' : ''}</Text><Text type="secondary">@{member.username} · {date(member.joinedAt)}加入</Text></div>
             {manage && member.role !== 'owner' && (team.role === 'owner' || member.role !== 'admin') ? <div className="team-member-controls"><Select aria-label={'设置 ' + member.username + ' 的角色'} size="small" disabled={busy} value={member.role} onChange={value => changeMember(member, value)}>{(team.role === 'owner' ? ['admin', 'editor', 'viewer'] : ['editor', 'viewer']).map(role => <Select.Option key={role} value={role}>{roleNames[role as TeamRole]}</Select.Option>)}</Select>
               <Button size="mini" status="danger" disabled={busy} onClick={() => Modal.confirm({title: `移除 ${member.username}？`, content: '其访问权立即失效，团队资料仍保留。', onOk: async () => { if (!await run(async () => { await teamApi(team.id, '/members/' + member.id, 'DELETE'); await changed(); })) throw new Error('移除失败'); }})}>移除</Button></div> : <Tag>{roleNames[member.role]}</Tag>}
           </div>)}
@@ -133,7 +133,7 @@ export function TeamSettingsPage({team, user, onMenu, onChanged, onLeave}: {team
           <Alert content="所有者和管理员始终可访问全部团队资料；其他成员的权限不超过其团队角色。"/>
           <div className="account-form"><Select aria-label="设置权限的文件夹" placeholder="选择文件夹" value={folderId || undefined} onChange={setFolderId}>{folders.filter(f => !f.deletedAt).map(f => <Select.Option key={f.id} value={f.id}>{f.name}</Select.Option>)}</Select>
             {folderId && <><Select aria-label="文件夹可见范围" value={mode} onChange={setMode} disabled={busy}><Select.Option value="team">团队可见 · 按角色授权</Select.Option><Select.Option value="restricted">指定成员可见</Select.Option></Select>
-              {mode === 'restricted' && members.filter(m => !['owner', 'admin'].includes(m.role)).map(m => <div className="team-grant-row" key={m.id}><Text>{m.username} · {roleNames[m.role]}</Text><Select aria-label={m.username + ' 的文件夹权限'} value={grants[m.id] ?? ''} disabled={busy} onChange={value => setGrants(previous => ({...previous, [m.id]: value}))}><Select.Option value="">不可访问</Select.Option><Select.Option value="view">查看</Select.Option>{m.role === 'editor' && <Select.Option value="edit">编辑</Select.Option>}</Select></div>)}
+              {mode === 'restricted' && members.filter(m => !['owner', 'admin'].includes(m.role)).map(m => <div className="team-grant-row" key={m.id}><Text>{m.nickname || m.username} · {roleNames[m.role]}</Text><Select aria-label={m.username + ' 的文件夹权限'} value={grants[m.id] ?? ''} disabled={busy} onChange={value => setGrants(previous => ({...previous, [m.id]: value}))}><Select.Option value="">不可访问</Select.Option><Select.Option value="view">查看</Select.Option>{m.role === 'editor' && <Select.Option value="edit">编辑</Select.Option>}</Select></div>)}
               <Button type="primary" disabled={busy} onClick={() => Modal.confirm({title: '保存文件夹权限？', content: `将影响其中 ${affected} 篇备忘录，权限立即生效。`, onOk: async () => { if (!await run(async () => { await teamApi(team.id, '/folders/' + folderId + '/access', 'PUT', {mode, grants: Object.entries(grants).filter(([, permission]) => permission).map(([userId, permission]) => ({userId, permission}))}); await changed(); Message.success('文件夹权限已更新'); })) throw new Error('保存失败'); }})}>保存权限</Button>
             </>}
           </div>
@@ -142,7 +142,7 @@ export function TeamSettingsPage({team, user, onMenu, onChanged, onLeave}: {team
         </Tabs.TabPane>}
         {manage && <Tabs.TabPane key="activity" title="活动记录">
           {!activities.length && <Empty description="暂无活动记录"/>}
-          {activities.map(a => <div key={a.id} className="team-entry"><Text>{a.username} · {a.action}</Text><Text type="secondary">{a.objectName} · {date(a.createdAt)}</Text></div>)}
+          {activities.map(a => <div key={a.id} className="team-entry"><Text>{a.nickname || a.username} · {a.action}</Text><Text type="secondary">{a.objectName} · {date(a.createdAt)}</Text></div>)}
           {activityNext && <Button disabled={busy} onClick={() => void run(async () => { const d = await teamApi(team.id, '/activity?before=' + activityNext); setActivities(previous => [...previous, ...d.activities]); setActivityNext(d.next); })}>加载更多记录</Button>}
         </Tabs.TabPane>}
       </Tabs></Spin>

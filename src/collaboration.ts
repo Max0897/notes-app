@@ -1,11 +1,13 @@
 import {HocuspocusProvider, HocuspocusProviderWebsocket} from '@hocuspocus/provider';
 import * as Y from 'yjs';
 import type {Note, User} from './api';
+import {DraftStore, encodeUpdate, decodeUpdate} from './drafts';
 
 export type Collaborator = User & {name: string; color: string; editing?: boolean};
 export type CollaborationState = {
   connected: boolean; synced: boolean; canEdit: boolean; error: string; saved: boolean;
   me: Collaborator; members: Collaborator[]; note?: Omit<Note, 'content' | 'plainText'>;
+  recovered?: boolean; draftError?: boolean;
 };
 export const documentStamp = (doc: Y.Doc) => {
   const bytes = Y.encodeSnapshot(Y.snapshot(doc));
@@ -23,16 +25,29 @@ export class CollaborationSession {
   private listeners = new Set<() => void>();
   private destroyed = false;
   private localChanges = false;
-  constructor(teamId: string, noteId: string, user: User, url: string, websocketOptions: Record<string, any> = {}) {
+  private drafts: DraftStore;
+  constructor(teamId: string, noteId: string, user: User, url: string, websocketOptions: Record<string, any> = {}, draftStore?: DraftStore) {
     this.state = {connected: false, synced: false, canEdit: false, error: '', saved: false,
-      me: {...user, name: user.username, color: '#2563eb'}, members: []};
+      me: {...user, name: user.nickname || user.username, color: '#2563eb'}, members: []};
+    this.drafts = draftStore ?? new DraftStore(user.id, teamId, noteId);
+    for (const draft of this.drafts.read()) if (draft.yState) {
+      try { Y.applyUpdate(this.document, decodeUpdate(draft.yState)); this.localChanges = true; this.state.recovered = true; }
+      catch { this.state.draftError = true; }
+    }
     this.socket = new HocuspocusProviderWebsocket({url, autoConnect: false, maxDelay: 5000, ...websocketOptions});
     this.provider = new HocuspocusProvider({
       websocketProvider: this.socket, name: `team:${teamId}:note:${noteId}`, document: this.document,
       token: 'session', flushDelay: 50,
       onStatus: ({status}) => { this.state.connected = status === 'connected'; this.publish(); },
       onDisconnect: () => { this.state.connected = false; this.publish(); },
-      onSynced: ({state}) => { if (state) { this.state.synced = true; this.requestReceipt(); } this.publish(); },
+      onSynced: ({state}) => {
+        if (state) {
+          this.state.synced = true;
+          if (!this.state.canEdit && this.localChanges) { this.deny('编辑权限已变化，本地草稿尚未保存，请复制保留或丢弃草稿'); return; }
+          this.requestReceipt();
+        }
+        this.publish();
+      },
       onAuthenticated: ({scope}) => { this.state.canEdit = scope === 'read-write'; this.publish(); },
       onAuthenticationFailed: ({reason}) => this.deny(reason === 'permission-denied' ? '登录已失效或没有访问此备忘录的权限' : reason),
       onStateless: ({payload}) => {
@@ -43,6 +58,7 @@ export class CollaborationSession {
         } else if (message.type === 'permission') {
           this.state.canEdit = message.canEdit;
           if (!message.canEdit) { this.provider.setAwarenessField('editing', false); this.provider.setAwarenessField('cursor', null); }
+          if (!message.canEdit && this.localChanges) { this.deny('编辑权限已变化，本地草稿尚未保存，请复制保留或丢弃草稿'); return; }
         } else if (message.type === 'saved') {
           this.savedStamp = message.stamp;
           if (!this.state.note || message.note.version >= this.state.note.version) this.state.note = message.note;
@@ -54,6 +70,7 @@ export class CollaborationSession {
     });
     this.document.on('update', (_update, origin, _doc, transaction) => {
       if (transaction.local && origin !== this.provider) this.localChanges = true;
+      if (this.localChanges) this.state.draftError = !this.drafts.write({yState: encodeUpdate(Y.encodeStateAsUpdate(this.document))});
       this.publish();
     });
     this.provider.setAwarenessField('user', this.state.me);
@@ -63,7 +80,7 @@ export class CollaborationSession {
     if (this.destroyed) return;
     const saved = this.savedStamp === documentStamp(this.document) && !this.provider?.hasUnsyncedChanges;
     this.state.saved = this.state.synced && saved;
-    if (this.state.saved) this.localChanges = false;
+    if (this.state.saved) { this.localChanges = false; this.drafts.clear(); }
     const users = new Map<string, Collaborator>();
     if (this.state.connected) for (const state of this.provider?.awareness?.getStates().values() ?? []) {
       const user = state.user;
@@ -85,6 +102,7 @@ export class CollaborationSession {
     this.socket.disconnect(); this.publish();
   }
   hasChanges() { return this.localChanges; }
+  discardDraft() { this.drafts.clear(); this.localChanges = false; }
   async flush(): Promise<boolean> {
     if (this.state.error) return !this.localChanges;
     if (!this.state.connected || !this.state.synced) return !this.localChanges && this.state.synced;

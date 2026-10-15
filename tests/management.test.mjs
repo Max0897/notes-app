@@ -130,12 +130,12 @@ test('头像：旧版数据库与现有会话无损升级，重启保留配置',
     db.prepare('INSERT INTO sessions VALUES (?, ?, ?)').run(digest, id, Date.now() + 600000);
     db.close();
   });
-  assert.deepEqual((await legacy.request('/auth/me', {cookie})).json.user, {id, username: 'legacy-avatar', avatarStyle: 'cutouts', avatarSeed: id});
+  assert.deepEqual((await legacy.request('/auth/me', {cookie})).json.user, {id, username: 'legacy-avatar', nickname: 'legacy-avatar', avatarStyle: 'cutouts', avatarSeed: id});
   const config = {avatarStyle: 'cutouts', avatarSeed: 'legacy-saved'};
   await legacy.request('/auth/avatar', {method: 'PATCH', cookie, body: config});
   await legacy.stop();
   const next = await fixture(t, {DATA_DIR: legacyDir});
-  assert.deepEqual((await next.request('/auth/me', {cookie})).json.user, {id, username: 'legacy-avatar', ...config});
+  assert.deepEqual((await next.request('/auth/me', {cookie})).json.user, {id, username: 'legacy-avatar', nickname: 'legacy-avatar', ...config});
   await next.stop();
 });
 

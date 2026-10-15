@@ -1,7 +1,8 @@
 export type Note = { id: string; title: string; content: any; plainText: string; folderId: string | null; pinned: boolean; deletedAt: string | null; version: number; createdAt: string; updatedAt: string; canEdit?: boolean; canManage?: boolean; modifiedBy?: string };
 export type Folder = { id: string; name: string; canEdit?: boolean; restricted?: boolean; deletedAt?: string | null };
 export type AvatarStyle = 'cutouts';
-export type User = { id: string; username: string; avatarStyle: AvatarStyle; avatarSeed: string };
+export type User = { id: string; username: string; nickname: string; avatarStyle: AvatarStyle; avatarSeed: string };
+export const displayName = (user: {username: string; nickname?: string}) => user.nickname || user.username;
 export type EditorBridge = { flush: () => Promise<boolean>; snapshot: () => Note; hasChanges: () => boolean; draft: () => string };
 export type TeamRole = 'owner' | 'admin' | 'editor' | 'viewer';
 export type Team = {id: string; name: string; description: string; icon: string; role: TeamRole; ownerId: string; createdAt: string; deletedAt: string | null; revision: number};

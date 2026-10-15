@@ -1,11 +1,14 @@
 import {lazy, Suspense, useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent} from 'react';
 import {Badge, Button, Card, Checkbox, Drawer, Dropdown, Empty, Input, List, Menu, Message, Modal, Select, Space, Spin, Tag, Tooltip, Typography} from '@arco-design/web-react';
-import {ArrowLeft, Bell, BookOpen, Check, CheckSquare, Edit3, Folder as FolderIcon, Mail, Menu as MenuIcon, MoreHorizontal, Pencil, Plus, RotateCcw, Search, Settings, Star, Trash2} from 'lucide-react';
+import {ArrowLeft, Bell, BookOpen, Check, CheckSquare, Edit3, FileCode2, FileText, Folder as FolderIcon, Mail, Menu as MenuIcon, MoreHorizontal, Pencil, Plus, RotateCcw, Search, Settings, Star, Trash2, History, Link as LinkIcon, MessageSquare, Upload} from 'lucide-react';
 import {api, ApiError, isManager, type AppNotification, type Team, type EditorBridge, type Folder, type Note, type User} from './api';
 import {AccountMenu} from './AccountMenu';
 import {NoteEditor} from './NoteEditor';
 import {SpaceSwitcher} from './SpaceSwitcher';
 import {WorkspacePage} from './WorkspacePage';
+import {downloadFiles} from './dataTransfer';
+import {dateMatches, snippet, type DateFilter} from './noteSearch';
+import {Highlight} from './Highlight';
 
 const {Text, Title, Paragraph} = Typography;
 const AccountPage = lazy(() => import('./AccountPage').then(module => ({default: module.AccountPage})));
@@ -13,6 +16,7 @@ const CreateTeamDialog = lazy(() => import('./TeamViews').then(module => ({defau
 const InvitationsPage = lazy(() => import('./TeamViews').then(module => ({default: module.InvitationsPage})));
 const TeamSettingsPage = lazy(() => import('./TeamViews').then(module => ({default: module.TeamSettingsPage})));
 const NotificationsPage = lazy(() => import('./NotificationsPage').then(module => ({default: module.NotificationsPage})));
+const NoteActivity = lazy(() => import('./NoteActivity').then(module => ({default: module.NoteActivity})));
 const pageTitles = {notifications: '通知中心', invitations: '团队邀请', settings: '团队设置', account: '账号设置'};
 const date = (value: string) => new Date(value).toLocaleDateString('zh-CN', {month: 'short', day: 'numeric'});
 const Ico = ({Icon, text}: {Icon: typeof FolderIcon; text: string}) => <span className="ico-label"><Icon size={16}/><span>{text}</span></span>;
@@ -31,9 +35,15 @@ function folderMoveMenu(folders: Folder[], currentFolderId: string | null | unde
 export function App() {
   const [user, setUser] = useState<User | null>(null);
   const [boot, setBoot] = useState(true), [authMode, setAuthMode] = useState(false);
+  const [nickname, setNickname] = useState('');
   const [username, setUsername] = useState(''), [password, setPassword] = useState(''), [authBusy, setAuthBusy] = useState(false);
   const [notes, setNotes] = useState<Note[]>([]), [folders, setFolders] = useState<Folder[]>([]);
   const [scope, setScope] = useState('all'), [search, setSearch] = useState('');
+  const [dateFilter, setDateFilter] = useState<DateFilter>('all'), [searchIndex, setSearchIndex] = useState(-1);
+  const [activity, setActivity] = useState<'history' | 'comments' | null>(null);
+  const importInput = useRef<HTMLInputElement>(null);
+  const linkedHandler = useRef<() => void>();
+  const linkRequest = useRef(0);
   const [selected, setSelected] = useState<string | null>(null), [mobile, setMobile] = useState(false);
   const [loading, setLoading] = useState(true), [drawerOpen, setDrawerOpen] = useState(false);
   const [folderDialog, setFolderDialog] = useState<{mode: 'create' | 'rename'; id?: string; name: string} | null>(null);
@@ -58,7 +68,7 @@ export function App() {
   const workspaceApi = (path: string, method = 'GET', body?: any) => api((teamId ? '/teams/' + teamId : '') + path, method, body);
   async function loadSpaces() { const data = await api('/spaces'); setTeams(data.teams); return data.teams as Team[]; }
   function preserveDraft() { if (editorRef.current?.hasChanges()) setDraft(editorRef.current.draft()); }
-  function resetWorkspace(id: string | null) { setTeamId(id); setNotes([]); setFolders([]); setSelected(null); setScope('all'); setSearch(''); setMobile(false); setDrawerOpen(false); setCreateTeamOpen(false); setView('notes'); resetSelection(); setLoading(true); }
+  function resetWorkspace(id: string | null) { setActivity(null); setDateFilter('all'); setTeamId(id); setNotes([]); setFolders([]); setSelected(null); setScope('all'); setSearch(''); setMobile(false); setDrawerOpen(false); setCreateTeamOpen(false); setView('notes'); resetSelection(); setLoading(true); }
   async function switchWorkspace(id: string | null) { if (id !== teamId || view !== 'notes') await safeSwitch(() => { if (id !== teamId) resetWorkspace(id); setView('notes'); }); }
   async function teamChanged() { await loadSpaces(); if (teamId) await reload(); }
   async function teamLeft() { preserveDraft(); resetWorkspace(null); await loadSpaces(); }
@@ -128,7 +138,7 @@ export function App() {
 
   async function auth(event: FormEvent) {
     event.preventDefault(); setAuthBusy(true);
-    try { const data = await api('/auth/' + (authMode ? 'register' : 'login'), 'POST', {username, password}); setLoading(true); setUser(data.user); setPassword(''); }
+    try { const data = await api('/auth/' + (authMode ? 'register' : 'login'), 'POST', {username, password, ...(authMode && nickname.trim() ? {nickname} : {})}); setLoading(true); setUser(data.user); setPassword(''); }
     catch (error) { Message.error((error as Error).message); }
     finally { setAuthBusy(false); }
   }
@@ -141,16 +151,58 @@ export function App() {
     void safeSwitch(() => { setView('notes'); setScope(key); setMobile(false); setDrawerOpen(false); resetSelection(); });
   }
   function openPage(page: keyof typeof pageTitles) { void safeSwitch(() => { setView(page); setMobile(false); setDrawerOpen(false); resetSelection(); }); }
-  async function openNotificationNote(notification: AppNotification) {
+  async function openNotificationNote(notification: Pick<AppNotification, 'noteId' | 'teamId'> & {kind?: string}) {
     await safeSwitch(async () => {
       try {
         const prefix = notification.teamId ? '/teams/' + notification.teamId : '';
-        const [a, b, c] = await Promise.all([api(prefix + '/notes'), api(prefix + '/folders'), api('/spaces')]);
-        const note = a.notes.find((n: Note) => n.id === notification.noteId);
+        const request = ++linkRequest.current;
+        const [a, b, c, target] = await Promise.all([api(prefix + '/notes'), api(prefix + '/folders'), api('/spaces'), api(prefix + '/notes/' + notification.noteId)]);
+        if (request !== linkRequest.current) return;
+        const note = target.note as Note;
         if (!note) { Message.info('备忘录已不存在或你已没有访问权限'); return; }
         resetWorkspace(notification.teamId); setNotes(a.notes); setFolders(b.folders); setTeams(c.teams);
-        setScope(note.deletedAt ? 'trash' : 'all'); setSelected(note.id); setView('notes'); setMobile(true); setLoading(false);
+        setActivity((notification.kind === 'note_mention' || notification.kind === 'note_comment_reply') ? 'comments' : null); setScope(note.deletedAt ? 'trash' : 'all'); setSelected(note.id); setView('notes'); setMobile(true); setLoading(false);
       } catch (error) { Message.error((error as Error).message); }
+    });
+  }
+  linkedHandler.current = () => {
+    const params = new URLSearchParams(location.hash.slice(1)), noteId = params.get('note'), linkedTeam = params.get('team');
+    const valid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+    if (noteId && valid(noteId) && (!linkedTeam || valid(linkedTeam))) void openNotificationNote({noteId, teamId: linkedTeam});
+  };
+  useEffect(() => {
+    if (!userId) return; linkedHandler.current?.();
+    const handler = () => linkedHandler.current?.(); window.addEventListener('hashchange', handler);
+    return () => window.removeEventListener('hashchange', handler);
+  }, [userId]);
+  useEffect(() => {
+    if (userId && selected && view === 'notes') {
+      const params = new URLSearchParams({note: selected}); if (teamId) params.set('team', teamId);
+      history.replaceState(null, '', location.pathname + location.search + '#' + params);
+    }
+  }, [userId, selected, teamId, view]);
+  async function copyNoteLink(note: Note) {
+    const url = new URL(location.href), params = new URLSearchParams({note: note.id}); if (teamId) params.set('team', teamId); url.hash = params.toString();
+    try { await navigator.clipboard.writeText(url.href); Message.success('链接已复制，打开时仍需具备访问权限'); } catch { Message.error('复制失败，请复制浏览器地址栏中的链接'); }
+  }
+  async function exportNotes(ids: string[], format: 'markdown' | 'text') {
+    await safeSwitch(async () => {
+      try { const data = await workspaceApi('/notes/export', 'POST', {ids, format}); downloadFiles(data.files); Message.success('已导出 ' + data.files.length + ' 篇备忘录'); }
+      catch (error) { Message.error((error as Error).message); }
+    });
+  }
+  async function importNotes(files: FileList | null) {
+    if (!files?.length) return;
+    const list = Array.from(files); if (list.length > 20) { Message.warning('每次最多导入 20 个文件'); return; }
+    await safeSwitch(async () => {
+      setBatchBusy(true);
+      try {
+        if (list.some(file => !/\.(md|markdown|txt)$/i.test(file.name) || file.size > 600000)) throw new Error('请选择不超过 600 KB 的 MD 或文本文件');
+        const body = {files: await Promise.all(list.map(async file => ({name: file.name, text: await file.text()}))), folderId: activeFolders.some(folder => folder.id === scope) ? scope : null};
+        if (new TextEncoder().encode(JSON.stringify(body)).length > 1000000) throw new Error('本次导入内容过大，请分批导入');
+        const data = await workspaceApi('/notes/import', 'POST', body);
+        setNotes(previous => [...data.notes, ...previous]); setScope(body.folderId ?? 'all'); setSelected(data.notes[0].id); setMobile(true); setSearch(''); resetSelection(); Message.success('已导入 ' + data.notes.length + ' 篇备忘录');
+      } catch (error) { Message.error((error as Error).message); } finally { setBatchBusy(false); }
     });
   }
   async function newNote(folder?: Folder) {
@@ -158,7 +210,7 @@ export function App() {
       try {
         const folderId = folder?.id ?? (folders.some(item => item.id === scope) ? scope : null);
         const data = await workspaceApi('/notes', 'POST', {folderId});
-        upsert(data.note); setSelected(data.note.id); setView('notes');
+        upsert(data.note); setActivity(null); setSelected(data.note.id); setView('notes');
         if (folder) setScope(folder.id); else if (scope === 'trash' || scope === 'pinned') setScope('all');
         setSearch(''); setMobile(true); setDrawerOpen(false); resetSelection();
       } catch (error) { Message.error((error as Error).message); }
@@ -190,6 +242,8 @@ export function App() {
     else void mutateNote(note.id, {folderId});
   }
   function noteMenu(note: Note) { return <Menu className="note-context-menu" onClickMenuItem={key => contextAction(note, String(key))}>
+    <Menu.Item key="link"><Ico Icon={LinkIcon} text="复制链接"/></Menu.Item>
+    <Menu.Item key="export-md"><Ico Icon={FileCode2} text="导出 MD"/></Menu.Item>
     {note.deletedAt ? <Menu.Item key="restore" disabled={note.canEdit === false}><Ico Icon={RotateCcw} text="恢复备忘录"/></Menu.Item> : [
       <Menu.Item key="pin" disabled={note.canEdit === false}><Ico Icon={Star} text={note.pinned ? '取消置顶' : '置顶'}/></Menu.Item>,
       folderMoveMenu(writableFolders, note.folderId, note.canEdit === false),
@@ -197,7 +251,9 @@ export function App() {
     ]}
   </Menu>; }
   function contextAction(note: Note, key: string) {
-    if (key === 'pin') void mutateNote(note.id, {pinned: !note.pinned});
+    if (key === 'link') void copyNoteLink(note);
+    else if (key === 'export-md') void exportNotes([note.id], 'markdown');
+    else if (key === 'pin') void mutateNote(note.id, {pinned: !note.pinned});
     else if (key === 'trash') void mutateNote(note.id, {deletedAt: new Date().toISOString()});
     else if (key === 'restore') void mutateNote(note.id, {deletedAt: null});
     else if (key.startsWith('move:')) moveNote(note, key.slice(5) || null);
@@ -248,7 +304,7 @@ export function App() {
   const query = search.trim().toLocaleLowerCase();
   const visible = notes.filter(note => scope === 'trash' ? !!note.deletedAt : !note.deletedAt && (
     scope === 'all' || (scope === 'pinned' && note.pinned) || note.folderId === scope
-  )).filter(note => (note.title + ' ' + note.plainText).toLocaleLowerCase().includes(query))
+  )).filter(note => dateMatches(note.updatedAt, dateFilter)).filter(note => (note.title + ' ' + note.plainText).toLocaleLowerCase().includes(query))
     .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updatedAt.localeCompare(a.updatedAt));
   const scopeName = scope === 'all' ? '所有备忘录' : scope === 'pinned' ? '已置顶' : scope === 'trash' ? '最近删除' : folders.find(folder => folder.id === scope)?.name || '备忘录';
   const eligible = visible.filter(note => note.canEdit !== false);
@@ -295,6 +351,7 @@ export function App() {
   function moreAction(key: string) {
     setMoreOpen(false);
     if (batchBusy) return;
+    if (key === 'import') { importInput.current?.click(); return; }
     if (key === 'select-all') {
       setChecked(allChecked ? [] : eligible.slice(0, 100).map(note => note.id));
       if (!allChecked && eligible.length > 100) Message.info('已选择前 100 篇笔记');
@@ -307,6 +364,7 @@ export function App() {
 
   shortcutHandler.current = event => {
     if (!user) return;
+    if (event.key === 'Escape' && document.querySelector('.editor-context-menu, .mention-options')) return;
     const modifier = (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey;
     const key = event.key.toLowerCase();
     if (modifier && (key === 's' || event.code === 'KeyS')) {
@@ -320,6 +378,7 @@ export function App() {
         setView('notes'); setMobile(false); setDrawerOpen(false);
         requestAnimationFrame(() => document.querySelector<HTMLInputElement>('.note-search input')?.focus());
       });
+    } else if (event.key === 'Escape' && activity) { setActivity(null); event.preventDefault();
     } else if (event.key === 'Escape' && !createTeamOpen && !folderDialog && !drawerOpen) {
       if (event.target instanceof Element && event.target.closest('.account-menu, .user-row[aria-expanded="true"]')) return;
       if (contextNoteId) { setContextNoteId(null); event.preventDefault(); }
@@ -341,6 +400,7 @@ export function App() {
     <form className="auth-form" onSubmit={auth}>
       <label htmlFor="auth-username"><Text type="secondary">用户名</Text></label>
       <Input id="auth-username" autoComplete="username" value={username} onChange={setUsername} placeholder="3–32 个字符" maxLength={32}/>
+      {authMode && <Input aria-label="注册昵称" autoComplete="nickname" value={nickname} onChange={setNickname} placeholder="昵称（选填，默认使用用户名）" maxLength={64}/>}
       <label htmlFor="auth-password"><Text type="secondary">密码</Text></label>
       <Input.Password id="auth-password" autoComplete={authMode ? 'new-password' : 'current-password'} value={password} onChange={setPassword} placeholder="至少 8 个字符" maxLength={128}/>
       <Button className="auth-submit" type="primary" long htmlType="submit" loading={authBusy}>{authMode ? '创建账号' : '登录'}</Button>
@@ -376,7 +436,7 @@ export function App() {
   function openNote(note: Note) {
     if (batchBusy) return;
     setContextNoteId(null);
-    void safeSwitch(() => { setSelected(note.id); setMobile(true); });
+    void safeSwitch(() => { setActivity(null); setSelected(note.id); setMobile(true); });
   }
 
   return <div className={'app-shell' + (mobile ? ' mobile-edit' : '')}>
@@ -399,6 +459,7 @@ export function App() {
               <Menu.ItemGroup title={`已选 ${checkedVisible.length} 篇`}>
                 <Menu.Item key="select-all" disabled={batchBusy || !eligible.length}><Ico Icon={CheckSquare} text={allChecked ? '取消全选' : eligible.length > 100 ? '选择前 100 篇' : '全选'}/></Menu.Item>
               </Menu.ItemGroup>
+              <Menu.Item key="import" disabled={batchBusy || !canCreate || scope === 'trash'}><Ico Icon={Upload} text="导入 MD / 文本"/></Menu.Item>
               {scope === 'trash' ? <Menu.Item key="restore" disabled={!checkedVisible.length || batchBusy}><Ico Icon={RotateCcw} text="恢复所选"/></Menu.Item> : [
                 folderMoveMenu(writableFolders, checkedFolderId, !checkedVisible.length || batchBusy),
                 <Menu.Item key="trash" disabled={!checkedVisible.length || batchBusy}><Ico Icon={Trash2} text="删除所选"/></Menu.Item>,
@@ -408,19 +469,29 @@ export function App() {
         </Space>
       </div>
       <div className="list-scroll">
-        <div className="note-search"><Input allowClear prefix={<Search size={16}/>} placeholder="搜索备忘录" value={search} disabled={batchBusy} onChange={value => { setSearch(value); resetSelection(); }}/></div>
+        <div className="note-search"><Input allowClear prefix={<Search size={16}/>} placeholder="搜索备忘录" value={search} disabled={batchBusy} onChange={value => { setSearch(value); setSearchIndex(-1); resetSelection(); }} onKeyDown={event => {
+          if (event.nativeEvent.isComposing) return;
+          if (['ArrowDown', 'ArrowUp'].includes(event.key) && visible.length) {
+            event.preventDefault(); const index = (searchIndex + (event.key === 'ArrowDown' ? 1 : -1) + visible.length) % visible.length; setSearchIndex(index);
+            document.querySelector('[data-note-id="' + visible[index].id + '"]')?.scrollIntoView({block: 'nearest'});
+          } else if (event.key === 'Enter' && visible.length) { event.preventDefault(); openNote(visible[Math.min(Math.max(0, searchIndex), visible.length - 1)]); }
+        }}/>
+          {(search || dateFilter !== 'all') && <div className="search-filters"><Select size="mini" aria-label="按修改时间筛选" value={dateFilter} onChange={value => { setDateFilter(value); setSearchIndex(-1); resetSelection(); }}>
+            <Select.Option value="all">全部时间</Select.Option><Select.Option value="today">今天修改</Select.Option><Select.Option value="week">近 7 天</Select.Option><Select.Option value="month">近 30 天</Select.Option>
+          </Select><Text type="secondary">↑↓ 选择 · Enter 打开</Text></div>}
+        </div>
         <Spin loading={loading} style={{display: 'block', minWidth: 0}}>
           {!visible.length ? <div className="list-empty"><Empty description={query ? '没有匹配的备忘录' : '这里还没有备忘录'}/>{scope !== 'trash' && canCreate && <Button type="primary" size="small" onClick={() => void newNote()}>写下第一条</Button>}</div> :
             <List grid={{gutter: [0, 16], span: 24}} bordered={false} split={false} dataSource={visible} render={(note: Note) => <Dropdown key={note.id} trigger="contextMenu" disabled={batchBusy}
               popupVisible={contextNoteId === note.id} onVisibleChange={open => { if (open) { setMoreOpen(false); setContextNoteId(note.id); } else setContextNoteId(previous => previous === note.id ? null : previous); }}
               triggerProps={{clickToClose: false, autoFitPosition: true, escToClose: true}}
               droplist={noteMenu(note)}>
-              <Card data-note-id={note.id} size="small" className="note-card" role="group" aria-label={note.title || '新备忘录'}
+              <Card data-note-id={note.id} size="small" className={"note-card" + (visible[searchIndex]?.id === note.id ? " search-active" : "")} role="group" aria-label={note.title || '新备忘录'}
               style={checked.includes(note.id) || selected === note.id ? {borderColor: 'rgb(var(--primary-6))', background: 'rgb(var(--primary-1))'} : undefined}
               onClick={() => openNote(note)}>
               <div className="note-card-row"><span onClick={event => event.stopPropagation()}><Checkbox aria-label={'选择笔记：' + (note.title || '新备忘录')} checked={checked.includes(note.id)} disabled={batchBusy || note.canEdit === false} onChange={() => toggleChecked(note.id)}/></span>
-                <div className="note-card-content" tabIndex={0} role="button" aria-label={'打开笔记：' + (note.title || '新备忘录')} onKeyDown={event => cardKey(event, note)}><div className="note-card-head"><Text className="note-card-title" style={{fontWeight: 600}}>{note.title || '新备忘录'}</Text>{note.pinned && <Tag size="small" color="gold">置顶</Tag>}</div>
-                  <Text type="secondary" className="note-card-desc">{date(note.updatedAt)} · {note.plainText.slice(0, 50) || '暂无内容'}</Text>
+                <div className="note-card-content" tabIndex={0} role="button" aria-label={'打开笔记：' + (note.title || '新备忘录')} onKeyDown={event => cardKey(event, note)}><div className="note-card-head"><Text className="note-card-title" style={{fontWeight: 600}}><Highlight text={note.title || '新备忘录'} query={search}/></Text>{note.pinned && <Tag size="small" color="gold">置顶</Tag>}</div>
+                  <Text type="secondary" className="note-card-desc">{date(note.updatedAt)} · <Highlight text={snippet(note.plainText, search) || '暂无内容'} query={search}/></Text>
                 </div>
                 <span onClick={event => event.stopPropagation()}><Dropdown trigger="click" position="br" droplist={noteMenu(note)}><Button className="note-touch-more" aria-label={'笔记操作：' + (note.title || '新备忘录')} type="text" size="mini" disabled={batchBusy} icon={<MoreHorizontal size={16}/>}/></Dropdown></span>
               </div>
@@ -434,16 +505,30 @@ export function App() {
         <Tooltip content="返回列表"><Button className="back" type="text" size="small" aria-label="返回列表" icon={<ArrowLeft size={16}/>} onClick={() => void safeSwitch(() => setMobile(false))}/></Tooltip>
         <Text className="editor-folder-name" type="secondary">{current.deletedAt ? '最近删除' : folders.find(folder => folder.id === current.folderId)?.name || '未分类'}</Text>
       </Space><Space size={4}>
-        {current.deletedAt ? <><Button size="small" disabled={batchBusy || current.canEdit === false} onClick={() => void mutate({deletedAt: null})}>恢复笔记</Button><Button size="small" status="danger" disabled={batchBusy || current.canManage === false} onClick={permaDelete}>永久删除</Button></> : <>
-          <Button size="small" disabled={batchBusy || current.canEdit === false} type={current.pinned ? 'primary' : 'text'} onClick={() => void mutate({pinned: !current.pinned})}>{current.pinned ? '已置顶' : '置顶'}</Button>
-          <Select size="small" aria-label="笔记所在文件夹" value={current.folderId ?? ''} disabled={batchBusy || current.canEdit === false} className="editor-folder-select" onChange={value => moveNote(current, value || null)}>
-            <Select.Option value="">未分类</Select.Option>{writableFolders.map(folder => <Select.Option key={folder.id} value={folder.id}>{folder.name}</Select.Option>)}
-          </Select>
-          <Tooltip content="移到最近删除"><Button aria-label="移到最近删除" size="small" type="text" status="danger" disabled={batchBusy || current.canEdit === false} icon={<Trash2 size={16}/>} onClick={() => void mutate({deletedAt: new Date().toISOString()})}/></Tooltip>
-        </>}
+        {current.deletedAt && <Button size="small" disabled={batchBusy || current.canEdit === false} onClick={() => void mutate({deletedAt: null})}>恢复笔记</Button>}
+        <Dropdown trigger="click" position="br" triggerProps={{autoFitPosition: true}} droplist={<Menu style={{maxHeight: 'min(360px, calc(100dvh - 72px))'}} onClickMenuItem={key => {
+          if (key === 'link') void copyNoteLink(current);
+          else if (String(key).startsWith('export-')) void exportNotes([current.id], key === 'export-md' ? 'markdown' : 'text');
+          else if (key === 'pin') void mutate({pinned: !current.pinned});
+          else if (String(key).startsWith('move:')) moveNote(current, String(key).slice(5) || null);
+          else if (key === 'trash') void mutate({deletedAt: new Date().toISOString()});
+          else if (key === 'delete') permaDelete();
+          else if (key === 'history' || key === 'comments') void safeSwitch(() => setActivity(key));
+        }}>
+          {!current.deletedAt && <Menu.Item key="pin" disabled={current.canEdit === false}><Ico Icon={Star} text={current.pinned ? '取消置顶' : '置顶'}/></Menu.Item>}
+          {!current.deletedAt && folderMoveMenu(writableFolders, current.folderId, current.canEdit === false)}
+          {!current.deletedAt && <Menu.Item key="history"><Ico Icon={History} text="历史版本"/></Menu.Item>}
+          {!current.deletedAt && teamId && <Menu.Item key="comments"><Ico Icon={MessageSquare} text="评论"/></Menu.Item>}
+          <Menu.Item key="link"><Ico Icon={LinkIcon} text="复制链接"/></Menu.Item>
+          <Menu.Item key="export-md"><Ico Icon={FileCode2} text="导出 MD"/></Menu.Item>
+          <Menu.Item key="export-txt"><Ico Icon={FileText} text="导出纯文本"/></Menu.Item>
+          {current.deletedAt ? <Menu.Item key="delete" disabled={current.canManage === false} className="note-menu-danger"><Ico Icon={Trash2} text="永久删除"/></Menu.Item> : <Menu.Item key="trash" disabled={current.canEdit === false} className="note-menu-danger"><Ico Icon={Trash2} text="删除"/></Menu.Item>}
+        </Menu>}><Button aria-label="备忘录更多操作" type="text" size="small" icon={<MoreHorizontal size={18}/>} disabled={batchBusy}/></Dropdown>
       </Space></div>
-      <NoteEditor user={user!} teamId={teamId} key={(teamId ?? 'personal') + current.id} note={current} onSave={upsert} ref={editorRef} readOnly={batchBusy || current.canEdit === false}/>
+      <NoteEditor user={user!} teamId={teamId} key={(teamId ?? 'personal') + current.id} note={current} onSave={upsert} ref={editorRef} readOnly={batchBusy || current.canEdit === false} onComment={teamId && !current.deletedAt ? () => void safeSwitch(() => setActivity('comments')) : undefined}/>
+      {activity && <Suspense fallback={null}><NoteActivity key={(teamId ?? 'personal') + current.id + activity} note={current} teamId={teamId} user={user} tab={activity} bridge={() => editorRef.current} onSave={upsert} onClose={() => setActivity(null)}/></Suspense>}
     </> : <div className="editor-empty"><Empty description="留一点空间，给灵感"/><Button type="primary" icon={<Plus size={16}/>} disabled={!canCreate} onClick={() => void newNote()}>新建备忘录</Button></div>}</main></>}
+    <input ref={importInput} type="file" accept=".md,.markdown,.txt" multiple hidden aria-label="导入备忘录文件" onChange={event => { void importNotes(event.target.files); event.target.value = ''; }}/>
     <Modal title={folderDialog?.mode === 'rename' ? '重命名文件夹' : '新建文件夹'} visible={!!folderDialog} onOk={submitFolderDialog} onCancel={() => setFolderDialog(null)} maskClosable={false} style={{maxWidth: 'calc(100vw - 32px)'}}>
       <Input autoFocus placeholder="请输入文件夹名称" maxLength={60} value={folderDialog?.name || ''} onChange={name => setFolderDialog(previous => previous ? {...previous, name} : null)} onPressEnter={() => { void submitFolderDialog().catch(() => {}); }}/>
     </Modal>

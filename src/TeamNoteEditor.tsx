@@ -1,7 +1,6 @@
 import {forwardRef, useEffect, useImperativeHandle, useRef, useState} from 'react';
 import {Alert, Button, Message, Spin, Tag, Tooltip, Typography} from '@arco-design/web-react';
-import {Check} from 'lucide-react';
-import {EditorContent, useEditor} from '@tiptap/react';
+import {useEditor} from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
@@ -10,12 +9,14 @@ import CollaborationCursor from '@tiptap/extension-collaboration-cursor';
 import * as Y from 'yjs';
 import {EditorLink, openEditorLink} from './editorLinks';
 import {EditorTools} from './EditorTools';
+import {EditorContextMenu} from './EditorContextMenu';
+import {SaveStatus} from './SaveStatus';
 import {UserAvatar} from './UserAvatar';
 import {CollaborationSession, type CollaborationState} from './collaboration';
 import type {EditorBridge, Note, User} from './api';
 
 const {Text} = Typography;
-type Props = {note: Note; onSave: (note: Note) => void; user: User; teamId: string; readOnly?: boolean};
+type Props = {note: Note; onSave: (note: Note) => void; user: User; teamId: string; readOnly?: boolean; onComment?: () => void};
 
 export const TeamNoteEditor = forwardRef<EditorBridge, Props>(function TeamNoteEditor(props, bridge) {
   const [session, setSession] = useState<CollaborationSession | null>(null);
@@ -38,7 +39,7 @@ export const TeamNoteEditor = forwardRef<EditorBridge, Props>(function TeamNoteE
   return <CollaborativeEditor {...props} session={session} state={state} ref={inner}/>;
 });
 
-const CollaborativeEditor = forwardRef<EditorBridge, Props & {session: CollaborationSession; state: CollaborationState}>(function CollaborativeEditor({note, onSave, readOnly, session, state}, bridge) {
+const CollaborativeEditor = forwardRef<EditorBridge, Props & {session: CollaborationSession; state: CollaborationState}>(function CollaborativeEditor({note, onSave, readOnly, session, state, onComment}, bridge) {
   const latest = useRef(note), onSaveRef = useRef(onSave);
   useEffect(() => { onSaveRef.current = onSave; }, [onSave]);
   const titleText = session.document.getText('title');
@@ -134,23 +135,24 @@ const CollaborativeEditor = forwardRef<EditorBridge, Props & {session: Collabora
   const otherMembers = state.members.filter(member => member.id !== state.me.id);
   const members = [...state.members.filter(member => member.id === state.me.id), ...otherMembers];
   return <>
+    {(state.recovered || state.draftError) && <div className="recovery-banner"><Text type={state.draftError ? 'warning' : 'secondary'}>{state.draftError ? '此设备暂时无法保存恢复草稿，请在服务器显示已保存后再关闭页面。' : state.saved ? '本地草稿已恢复并同步' : '已恢复本地草稿，正在合并同步…'}</Text></div>}
     <div className="format-bar collaboration-format-bar"><EditorTools editor={editor} disabled={!editable}/>
       <div className="editor-save-info">
         <div className="editor-collaboration-info"><Text type="secondary" title={'最后修改：' + (state.note?.modifiedBy ?? note.modifiedBy ?? '团队成员')}>最后修改：{state.note?.modifiedBy ?? note.modifiedBy ?? '团队成员'}</Text></div>
         <div className="collaborator-avatars" aria-label={`当前在线 ${members.length} 人`}>
-          {members.slice(0, 4).map(member => <Tooltip key={member.id} trigger={['hover', 'focus', 'click']} content={`${member.username}${member.id === state.me.id ? '（你）' : ''} · ${member.editing ? '正在编辑' : '正在查看'}`}>
-            <span className="collaborator-avatar" style={{borderColor: member.color}} tabIndex={0} aria-label={`${member.username} · ${member.editing ? '正在编辑' : '正在查看'}`}><UserAvatar user={member} size={24}/></span>
+          {members.slice(0, 4).map(member => <Tooltip key={member.id} trigger={['hover', 'focus', 'click']} content={`${member.name}${member.id === state.me.id ? '（你）' : ''} · ${member.editing ? '正在编辑' : '正在查看'}`}>
+            <span className="collaborator-avatar" style={{borderColor: member.color}} tabIndex={0} aria-label={`${member.name} · ${member.editing ? '正在编辑' : '正在查看'}`}><UserAvatar user={member} size={24}/></span>
           </Tooltip>)}
-          {members.length > 4 && <Tooltip trigger={['hover', 'focus', 'click']} content={members.slice(4).map(member => member.username).join('、')}><span className="collaborator-overflow" tabIndex={0}>+{members.length - 4}</span></Tooltip>}
+          {members.length > 4 && <Tooltip trigger={['hover', 'focus', 'click']} content={members.slice(4).map(member => member.name).join('、')}><span className="collaborator-overflow" tabIndex={0}>+{members.length - 4}</span></Tooltip>}
         </div>
         {!state.canEdit && <Tag size="small">只读</Tag>}
-        <Button title={status + ' · 立即保存（Ctrl / ⌘ + S）'} className="save-status" type="text" size="mini" onClick={() => void flush()} icon={state.saved && state.connected ? <Check size={14}/> : undefined}>{status}</Button>
+        <SaveStatus status={status} saved={state.saved && state.connected && !state.error} pendingLabel="同步中…" onSave={flush}/>
       </div>
     </div>
     {state.error && <div className="conflict-body"><Alert type="warning" content={<div className="collaboration-error"><span>{state.error}</span>{session.hasChanges() && <Button size="small" onClick={async () => {
       try { await navigator.clipboard.writeText(titleText.toString() + '\n\n' + (editor?.getText() ?? '')); Message.success('草稿已复制'); }
       catch { Message.error('复制失败，请手动选择内容复制'); }
-    }}>复制草稿</Button>}</div>}/></div>}
+    }}>复制草稿</Button>}{session.hasChanges() && <Button size="small" type="text" status="danger" onClick={() => { session.discardDraft(); location.reload(); }}>丢弃草稿并重新打开</Button>}</div>}/></div>}
     <div className="document-scroll"><div className="document">
       <Text type="secondary" className="document-date">{new Date(state.note?.updatedAt ?? note.updatedAt).toLocaleString('zh-CN', {year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit'})}</Text>
       <input ref={titleInput} className="title-input" aria-label="笔记标题" placeholder="新备忘录" maxLength={200} readOnly={!editable} value={title}
@@ -161,7 +163,7 @@ const CollaborativeEditor = forwardRef<EditorBridge, Props & {session: Collabora
         onCompositionEnd={event => { composing.current = false; changeTitle(event.currentTarget.value, compositionBase.current); }}
         onChange={event => { if (composing.current) setTitle(event.target.value); else changeTitle(event.target.value); }}
         onBlur={() => session.setEditing(false)}/>
-      <EditorContent editor={editor}/>
+      <EditorContextMenu editor={editor} disabled={!editable} onComment={onComment}/>
     </div></div>
     <div className="editor-footer"><Text type="secondary">{editor?.getText().length ?? 0} 字</Text><Text type="secondary">{!state.connected && !state.error ? '连接恢复后自动同步' : !state.canEdit ? '只读' : '实时协作 · 自动保存'}</Text></div>
   </>;

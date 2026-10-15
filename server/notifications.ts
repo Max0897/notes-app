@@ -16,12 +16,13 @@ export function initNotifications(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS notifications_unread ON notifications(user_id,read_at,id);
     DELETE FROM notifications WHERE kind='team_transfer';
   `);
+  db.exec('DROP TRIGGER IF EXISTS notifications_note_update; DROP TRIGGER IF EXISTS notifications_note_delete; DROP TRIGGER IF EXISTS notifications_invitation_created; DROP TRIGGER IF EXISTS notifications_invitation_resent;');
   for (const deleting of [false, true]) {
     const row = deleting ? 'OLD' : 'NEW';
     const deletionChanged = '(OLD.deleted_at IS NULL) != (NEW.deleted_at IS NULL)';
     const kind = deleting ? "'note_permanently_deleted'" : `CASE WHEN ${deletionChanged} THEN CASE WHEN NEW.deleted_at IS NULL THEN 'note_restored' ELSE 'note_deleted' END ELSE 'note_moved' END`;
     const title = deleting ? "'备忘录已永久删除'" : `CASE WHEN ${deletionChanged} THEN CASE WHEN NEW.deleted_at IS NULL THEN '备忘录已恢复' ELSE '备忘录已删除' END ELSE '备忘录已移动' END`;
-    const actor = `COALESCE((SELECT username FROM users WHERE id=${row}.updated_by),'团队成员')`;
+    const actor = `COALESCE((SELECT COALESCE(NULLIF(nickname,''),username) FROM users WHERE id=${row}.updated_by),'团队成员')`;
     const message = deleting ? `'「' || ${row}.title || '」已永久删除'` : `${actor} || CASE WHEN ${deletionChanged} THEN CASE WHEN NEW.deleted_at IS NULL THEN ' 恢复了「' ELSE ' 删除了「' END ELSE ' 移动了「' END || NEW.title || '」'`;
     db.exec(`CREATE TRIGGER IF NOT EXISTS notifications_note_${deleting ? 'delete' : 'update'}
       AFTER ${deleting ? 'DELETE' : 'UPDATE OF folder_id,deleted_at'} ON notes
@@ -52,13 +53,13 @@ export function initNotifications(db: Database.Database) {
     CREATE TRIGGER IF NOT EXISTS notifications_invitation_created AFTER INSERT ON team_invitations
     WHEN NEW.target_id IS NOT NULL BEGIN
       INSERT INTO notifications(user_id,kind,title,message,team_id,team_name,invitation_id)
-      SELECT NEW.target_id,'team_invitation','收到团队邀请',u.username || ' 邀请你加入「' || t.name || '」',t.id,t.name,NEW.id
+      SELECT NEW.target_id,'team_invitation','收到团队邀请',COALESCE(NULLIF(u.nickname,''),u.username) || ' 邀请你加入「' || t.name || '」',t.id,t.name,NEW.id
       FROM teams t JOIN users u ON u.id=NEW.created_by WHERE t.id=NEW.team_id;
     END;
     CREATE TRIGGER IF NOT EXISTS notifications_invitation_resent AFTER UPDATE OF token_hash ON team_invitations
     WHEN NEW.target_id IS NOT NULL AND NEW.status='pending' AND OLD.token_hash IS NOT NEW.token_hash BEGIN
       INSERT INTO notifications(user_id,kind,title,message,team_id,team_name,invitation_id)
-      SELECT NEW.target_id,'team_invitation','收到新的团队邀请',u.username || ' 重新邀请你加入「' || t.name || '」',t.id,t.name,NEW.id
+      SELECT NEW.target_id,'team_invitation','收到新的团队邀请',COALESCE(NULLIF(u.nickname,''),u.username) || ' 重新邀请你加入「' || t.name || '」',t.id,t.name,NEW.id
       FROM teams t JOIN users u ON u.id=NEW.created_by WHERE t.id=NEW.team_id;
     END;
     CREATE TRIGGER IF NOT EXISTS notifications_invitation_status AFTER UPDATE OF status ON team_invitations
@@ -86,7 +87,7 @@ export function initNotifications(db: Database.Database) {
   `);
   // 已有的待处理站内邀请也能在首次打开通知中心时看到，不复制令牌。
   db.exec(`INSERT INTO notifications(user_id,kind,title,message,team_id,team_name,invitation_id)
-    SELECT i.target_id,'team_invitation','收到团队邀请',u.username || ' 邀请你加入「' || t.name || '」',t.id,t.name,i.id
+    SELECT i.target_id,'team_invitation','收到团队邀请',COALESCE(NULLIF(u.nickname,''),u.username) || ' 邀请你加入「' || t.name || '」',t.id,t.name,i.id
     FROM team_invitations i JOIN teams t ON t.id=i.team_id JOIN users u ON u.id=i.created_by
     WHERE i.target_id IS NOT NULL AND i.status='pending' AND t.deleted_at IS NULL AND i.expires_at>CAST(strftime('%s','now') AS INTEGER)*1000
       AND NOT EXISTS(SELECT 1 FROM notifications n WHERE n.invitation_id=i.id AND n.kind='team_invitation');`);

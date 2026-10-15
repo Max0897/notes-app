@@ -8,11 +8,11 @@ import StarterKit from '@tiptap/starter-kit';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
 import Link from '@tiptap/extension-link';
-import {prosemirrorJSONToYDoc, yDocToProsemirrorJSON} from 'y-prosemirror';
+import {prosemirrorJSONToYDoc, prosemirrorJSONToYXmlFragment, yDocToProsemirrorJSON} from 'y-prosemirror';
 import * as decoding from 'lib0/decoding';
 import type Database from 'better-sqlite3';
 
-type User = {id: string; username: string; avatarStyle: 'cutouts'; avatarSeed: string};
+type User = {id: string; username: string; nickname: string; avatarStyle: 'cutouts'; avatarSeed: string};
 type Identity = {user: User; sessionHash: string; clientId?: number; color?: string; count?: number; until?: number};
 type Row = Record<string, any>;
 const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
@@ -42,7 +42,7 @@ export function createRealtime(db: Database.Database, options: {
     const token = cookie?.split(';').map(part => part.trim()).find(part => part.startsWith(options.cookieName + '='))?.slice(options.cookieName.length + 1);
     if (!token || !/^[A-Za-z0-9_-]{43}$/.test(token)) denied('登录已失效，请重新登录');
     const sessionHash = createHash('sha256').update(token).digest('hex');
-    const user = db.prepare(`SELECT u.id,u.username,'cutouts' AS avatarStyle,COALESCE(a.seed,u.id) AS avatarSeed
+    const user = db.prepare(`SELECT u.id,u.username,COALESCE(NULLIF(u.nickname,''),u.username) AS nickname,'cutouts' AS avatarStyle,COALESCE(a.seed,u.id) AS avatarSeed
       FROM sessions s JOIN users u ON u.id=s.user_id LEFT JOIN user_avatars a ON a.user_id=u.id
       WHERE s.token_hash=? AND s.expires_at>?`).get(sessionHash, Date.now()) as User | undefined;
     if (!user) denied('登录已失效，请重新登录');
@@ -65,7 +65,7 @@ export function createRealtime(db: Database.Database, options: {
     return {row, canEdit, canManage: manager};
   }
   function identityInfo(identity: Identity) {
-    return {...identity.user, name: identity.user.username, color: identity.color};
+    return {...identity.user, name: identity.user.nickname || identity.user.username, color: identity.color};
   }
   function chooseColor(name: string, identity: Identity) {
     let reserved = roomColors.get(name);
@@ -81,7 +81,7 @@ export function createRealtime(db: Database.Database, options: {
     const color = '#' + extra.toString(16).padStart(6, '0'); reserved.set(identity.user.id, color); return color;
   }
   function dto(row: Row, permission: {canEdit: boolean; canManage: boolean}) {
-    const author = db.prepare('SELECT username FROM users WHERE id=?').get(row.updated_by ?? row.user_id) as Row | undefined;
+    const author = db.prepare("SELECT COALESCE(NULLIF(nickname,''),username) AS username FROM users WHERE id=?").get(row.updated_by ?? row.user_id) as Row | undefined;
     return {id: row.id, title: row.title,
       folderId: row.folder_id, pinned: !!row.pinned, deletedAt: row.deleted_at, version: row.version,
       createdAt: row.created_at, updatedAt: row.updated_at, modifiedBy: author?.username ?? '团队成员', ...permission};
@@ -130,6 +130,17 @@ export function createRealtime(db: Database.Database, options: {
     for (const document of instance.documents.values()) for (const connection of document.getConnections() as Connection<Identity>[]) {
       try {
         const permission = access(document.name, connection.context);
+        const profile = db.prepare("SELECT u.id,u.username,COALESCE(NULLIF(u.nickname,''),u.username) AS nickname,'cutouts' AS avatarStyle,COALESCE(a.seed,u.id) AS avatarSeed FROM users u LEFT JOIN user_avatars a ON a.user_id=u.id WHERE u.id=?").get(connection.context.user.id) as User;
+        if (JSON.stringify(profile) !== JSON.stringify(connection.context.user)) {
+          connection.context.user = profile;
+          connection.sendStateless(JSON.stringify({type: 'ready', user: identityInfo(connection.context), canEdit: permission.canEdit}));
+          const clientId = connection.context.clientId, state = document.awareness.getStates().get(clientId!);
+          if (state) {
+            state.user = identityInfo(connection.context);
+            const meta = document.awareness.meta.get(clientId!); if (meta) meta.clock++;
+            document.awareness.emit('update', [{added: [], updated: [clientId], removed: []}, {source: 'local'}]);
+          }
+        }
         if (connection.readOnly !== !permission.canEdit) {
           connection.readOnly = !permission.canEdit;
           connection.sendStateless(JSON.stringify({type: 'permission', canEdit: permission.canEdit}));
@@ -257,7 +268,35 @@ export function createRealtime(db: Database.Database, options: {
     });
   }
   const check = setInterval(revalidate, 1000); check.unref();
-  return {attach, revalidate, async close() {
+  function restore(teamId: string, noteId: string, actorId: string, title: string, json: Record<string, unknown>) {
+    const name = `team:${teamId}:note:${noteId}`, live = instance.documents.get(name), previous = accepted.get(name);
+    const candidate = new Y.Doc();
+    try {
+      const stored = db.prepare('SELECT state FROM collaboration_documents WHERE note_id=?').get(noteId) as {state: Buffer} | undefined;
+      if (previous) Y.applyUpdate(candidate, Y.encodeStateAsUpdate(previous));
+      else if (stored) Y.applyUpdate(candidate, stored.state);
+      else {
+        const row = db.prepare('SELECT title,content FROM notes WHERE id=?').get(noteId) as Row;
+        const seed = prosemirrorJSONToYDoc(schema, JSON.parse(row.content), 'default'); seed.getText('title').insert(0, row.title);
+        Y.applyUpdate(candidate, Y.encodeStateAsUpdate(seed)); seed.destroy();
+      }
+      candidate.transact(() => {
+        const text = candidate.getText('title'); text.delete(0, text.length); text.insert(0, title);
+        // Apply a new edit to the existing CRDT, retaining all client clocks.
+        prosemirrorJSONToYXmlFragment(schema, json, candidate.getXmlFragment('default'));
+      }, 'history-restore');
+      persist(name, candidate, actorId);
+      const update = Y.encodeStateAsUpdate(candidate);
+      return () => {
+        if (live && previous) {
+          accepted.set(name, candidate); previous.destroy();
+          Y.applyUpdate(live, update, 'history-restore');
+          for (const connection of live.getConnections() as Connection<Identity>[]) sendSaved(connection);
+        } else candidate.destroy();
+      };
+    } catch (error) { candidate.destroy(); throw error; }
+  }
+  return {attach, revalidate, restore, async close() {
     clearInterval(check); instance.closeConnections();
     for (const ws of sockets.clients) ws.terminate(); sockets.close();
     await instance.flushPendingStores();

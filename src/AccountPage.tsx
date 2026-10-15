@@ -7,6 +7,8 @@ import {WorkspacePage} from './WorkspacePage';
 
 export function AccountPage({user, onUserChange, onMenu}: {user: User; onUserChange: (user: User) => void; onMenu: () => void}) {
   const {username} = user;
+  const [nickname, setNickname] = useState(user.nickname || username);
+  const [profileBusy, setProfileBusy] = useState(false);
   const [avatarSeed, setAvatarSeed] = useState(user.avatarSeed);
   const [avatarBusy, setAvatarBusy] = useState(false);
   const avatarChanged = avatarSeed !== user.avatarSeed;
@@ -53,7 +55,19 @@ export function AccountPage({user, onUserChange, onMenu}: {user: User; onUserCha
 
   return <WorkspacePage title="账号设置" onMenu={onMenu}>
     <Typography.Paragraph>当前账号：<Typography.Text bold>{username}</Typography.Text></Typography.Paragraph>
-    <Tabs className="settings-tabs" defaultActiveTab="avatar" overflow="scroll">
+    <Tabs className="settings-tabs" defaultActiveTab="profile" overflow="scroll">
+      <Tabs.TabPane key="profile" title="个人资料">
+        <form className="account-form" onSubmit={async event => {
+          event.preventDefault(); setProfileBusy(true);
+          try { const data = await api('/auth/profile', 'PATCH', {nickname}); onUserChange(data.user); setNickname(data.user.nickname); Message.success('昵称已保存'); }
+          catch (error) { Message.error((error as Error).message); } finally { setProfileBusy(false); }
+        }}>
+          <Input value={username} readOnly aria-label="登录用户名" placeholder="登录用户名"/>
+          <Input value={nickname} onChange={setNickname} maxLength={64} aria-label="昵称" placeholder="昵称（1–32 个字符）" disabled={profileBusy}/>
+          <Typography.Text type="secondary">昵称用于协作光标、在线状态和成员列表；登录及邀请仍使用用户名。</Typography.Text>
+          <Button type="primary" htmlType="submit" loading={profileBusy} disabled={!nickname.trim() || nickname.trim() === user.nickname}>保存资料</Button>
+        </form>
+      </Tabs.TabPane>
       <Tabs.TabPane key="avatar" title="头像" disabled={busy}>
         <div className="avatar-settings">
           <div className="avatar-preview"><UserAvatar user={{...user, avatarSeed}} size={96} label="头像预览"/></div>

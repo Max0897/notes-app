@@ -138,7 +138,7 @@ export function registerCollaboration(app: Hono<AppEnv>, db: Database.Database, 
     access(c, t, n.folder_id, edit); return n;
   }
   function noteDto(c: AppContext, t: Row & {role: Role}, n: Row) {
-    const user = db.prepare('SELECT username FROM users WHERE id=?').get(n.updated_by ?? n.user_id) as Row;
+    const user = db.prepare("SELECT COALESCE(NULLIF(nickname,''),username) AS username FROM users WHERE id=?").get(n.updated_by ?? n.user_id) as Row;
     return {id: n.id, title: n.title, content: JSON.parse(n.content), plainText: n.plain_text, folderId: n.folder_id,
       pinned: !!n.pinned, deletedAt: n.deleted_at, version: n.version, createdAt: n.created_at, updatedAt: n.updated_at,
       canEdit: can(c, t, n.folder_id, true) && !folder(t, n.folder_id)?.deleted_at, canManage: manager(t.role), modifiedBy: user?.username ?? '团队成员'};
@@ -214,7 +214,7 @@ export function registerCollaboration(app: Hono<AppEnv>, db: Database.Database, 
   });
   app.get('/api/teams/:teamId/members', c => {
     const t = team(c);
-    const members = db.prepare(`SELECT u.id,u.username,'cutouts' AS avatarStyle,COALESCE(a.seed,u.id) AS avatarSeed,m.role,m.joined_at AS joinedAt
+    const members = db.prepare(`SELECT u.id,u.username,COALESCE(NULLIF(u.nickname,''),u.username) AS nickname,'cutouts' AS avatarStyle,COALESCE(a.seed,u.id) AS avatarSeed,m.role,m.joined_at AS joinedAt
       FROM team_members m JOIN users u ON u.id=m.user_id LEFT JOIN user_avatars a ON a.user_id=u.id WHERE m.team_id=? ORDER BY m.joined_at`).all(t.id);
     return c.json({members});
   });
@@ -430,7 +430,7 @@ export function registerCollaboration(app: Hono<AppEnv>, db: Database.Database, 
   app.get('/api/teams/:teamId/activity', c => {
     const t = team(c, 'manage'); const before = Number(c.req.query('before') ?? Number.MAX_SAFE_INTEGER);
     if (!Number.isSafeInteger(before) || before < 1) fail(400, '分页参数无效');
-    const rows = db.prepare('SELECT a.id,a.action,a.object_name AS objectName,a.created_at AS createdAt,u.username FROM activity_logs a JOIN users u ON u.id=a.actor_id WHERE a.team_id=? AND a.id<? ORDER BY a.id DESC LIMIT 200').all(t.id, before) as Row[];
+    const rows = db.prepare("SELECT a.id,a.action,a.object_name AS objectName,a.created_at AS createdAt,u.username,COALESCE(NULLIF(u.nickname,''),u.username) AS nickname FROM activity_logs a JOIN users u ON u.id=a.actor_id WHERE a.team_id=? AND a.id<? ORDER BY a.id DESC LIMIT 200").all(t.id, before) as Row[];
     return c.json({activities: rows, next: rows.length === 200 ? rows[rows.length - 1].id : null});
   });
   app.post('/api/teams/:teamId/notes/:id/presence', async c => {
