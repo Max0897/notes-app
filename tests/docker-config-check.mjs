@@ -232,6 +232,9 @@ const healthChecks = [
 ].filter(([, text]) => text.includes('/api/health'));
 check(healthChecks.length > 0, `健康检查指向 /api/health（${healthChecks.map(([n]) => n).join('、')}）`);
 
+check(existsSync(resolve(root, 'dist-server/teams.js')), '团队接口已编译到运行目录');
+check(existsSync(resolve(root, 'dist-server/notifications.js')), '通知接口已编译到运行目录');
+
 section('Cookie 安全开关');
 check(/SECURE_COOKIES/.test(serverSource), '后端支持 SECURE_COOKIES 覆盖');
 check(/secure:\s*secureCookies/.test(serverSource), 'setCookie 使用 secureCookies 而非直接跟随 NODE_ENV');

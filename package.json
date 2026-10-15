@@ -10,7 +10,7 @@
     "build": "tsc -b && vite build && tsc -p tsconfig.server.json",
     "build:server": "tsc -p tsconfig.server.json",
     "typecheck": "tsc -b",
-    "test:api": "node --test tests/api.test.mjs tests/management.test.mjs",
+    "test:api": "node --test tests/api.test.mjs tests/management.test.mjs tests/teams.test.mjs tests/notifications.test.mjs",
     "test:docker": "node tests/docker-config-check.mjs",
     "test:e2e": "node tests/e2e-public.mjs",
     "lint": "oxlint",

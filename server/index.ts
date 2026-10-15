@@ -11,6 +11,8 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
+import {initCollaboration, registerCollaboration} from './teams.js';
+import {initNotifications, registerNotifications} from './notifications.js';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const production = process.env.NODE_ENV === 'production';
@@ -36,9 +38,9 @@ const MAX_TEXT_LENGTH = 200_000;
 const passwordOptions = { algorithm: Algorithm.Argon2id, memoryCost: 19_456, timeCost: 2, parallelism: 1 };
 
 type User = { id: string; username: string; avatarStyle: string; avatarSeed: string };
-type JsonObject = Record<string, unknown>;
-type AppEnv = { Variables: { user: User | undefined; sessionHash: string | undefined } };
-type AppContext = Context<AppEnv>;
+export type JsonObject = Record<string, unknown>;
+export type AppEnv = { Variables: { user: User | undefined; sessionHash: string | undefined } };
+export type AppContext = Context<AppEnv>;
 type NoteRow = {
   id: string;
   user_id: string;
@@ -66,7 +68,7 @@ export type Note = {
 };
 
 class ApiError extends Error {
-  constructor(public readonly status: 400 | 401 | 404 | 409 | 429, message: string) {
+  constructor(public readonly status: 400 | 401 | 403 | 404 | 409 | 429, message: string) {
     super(message);
   }
 }
@@ -294,10 +296,14 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS notes_user_updated ON notes(user_id, updated_at DESC);
   CREATE INDEX IF NOT EXISTS notes_user_folder ON notes(user_id, folder_id);
 `);
+const collaboration = initCollaboration(db);
+initNotifications(db);
+collaboration.cleanup();
 const deleteExpiredSessions = db.prepare('DELETE FROM sessions WHERE expires_at <= ?');
 deleteExpiredSessions.run(Date.now());
 const maintenance = setInterval(() => {
   deleteExpiredSessions.run(Date.now());
+  try { collaboration.cleanup(); } catch (error) { console.error('团队维护失败', error); }
   const now = Date.now();
   for (const [key, bucket] of buckets) if (bucket.resetAt <= now) buckets.delete(key);
 }, 60_000);
@@ -310,7 +316,7 @@ function noteFromRow(row: NoteRow): Note {
     deletedAt: row.deleted_at, version: row.version, createdAt: row.created_at, updatedAt: row.updated_at,
   };
 }
-const selectNote = db.prepare('SELECT * FROM notes WHERE id = ? AND user_id = ?');
+const selectNote = db.prepare('SELECT * FROM notes WHERE id = ? AND user_id = ? AND space_id = user_id');
 // 独立配置表兼容现有数据库；旧账号无需改写即可得到稳定的默认头像。
 const publicUserColumns = `users.id, users.username,
   'cutouts' AS avatarStyle,
@@ -325,7 +331,7 @@ function ownedNote(id: string, userId: string): NoteRow {
   return row;
 }
 function ownedFolder(id: string, userId: string): { id: string; name: string } {
-  const folder = db.prepare('SELECT id, name FROM folders WHERE id = ? AND user_id = ?').get(id, userId) as { id: string; name: string } | undefined;
+  const folder = db.prepare('SELECT id, name FROM folders WHERE id = ? AND user_id = ? AND space_id = user_id').get(id, userId) as { id: string; name: string } | undefined;
   if (!folder) throw new ApiError(404, '文件夹不存在');
   return folder;
 }
@@ -443,7 +449,7 @@ app.use('/api/*', async (c, next) => {
   }
   await next();
 });
-app.use('/api/*', bodyLimit({ maxSize: MAX_BODY_BYTES, onError: (c) => c.json({ error: '请求正文不能超过 1 MiB' }, 413) }));
+app.use('/api/*', (c, next) => bodyLimit({maxSize: MAX_BODY_BYTES, onError: ctx => ctx.json({error: '请求正文超过大小限制'}, 413)})(c, next));
 const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
   if (!c.get('user')) {
     clearSessionCookie(c);
@@ -568,10 +574,13 @@ app.post('/api/auth/logout-others', requireAuth, async c => {
   return c.json({ ok: true, revokedSessions: result.changes });
 });
 
+registerCollaboration(app, db, {readBody, requireAuth, requireLiveSession, verifyCurrentPassword, validateContent, folderName, ApiError});
+registerNotifications(app, db, {readBody, requireAuth, requireLiveSession, ApiError});
+
 app.use('/api/folders', requireAuth);
 app.use('/api/folders/*', requireAuth);
 app.get('/api/folders', (c) => {
-  const folders = db.prepare('SELECT id, name FROM folders WHERE user_id = ? ORDER BY rowid ASC').all(c.get('user')!.id);
+  const folders = db.prepare('SELECT id, name FROM folders WHERE user_id = ? AND space_id = user_id ORDER BY rowid ASC').all(c.get('user')!.id);
   return c.json({ folders });
 });
 app.post('/api/folders', async (c) => {
@@ -607,7 +616,7 @@ app.delete('/api/folders/:id', (c) => {
 app.use('/api/notes', requireAuth);
 app.use('/api/notes/*', requireAuth);
 app.get('/api/notes', (c) => {
-  const rows = db.prepare('SELECT * FROM notes WHERE user_id = ? ORDER BY updated_at DESC, id ASC').all(c.get('user')!.id) as NoteRow[];
+  const rows = db.prepare('SELECT * FROM notes WHERE user_id = ? AND space_id = user_id ORDER BY updated_at DESC, id ASC').all(c.get('user')!.id) as NoteRow[];
   return c.json({ notes: rows.map(noteFromRow) });
 });
 app.post('/api/notes', async (c) => {
