@@ -142,9 +142,8 @@ body{overflow:hidden}
 .ProseMirror a[href]{color:rgb(var(--primary-6));text-decoration:underline;text-underline-offset:3px;cursor:text}
 .ProseMirror.editor-alt-links a[href]{cursor:pointer}
 .invitation-link-form{padding-bottom:24px;border-bottom:1px solid var(--color-border-2)}
-.invitation-link-actions{justify-content:flex-end}
 .invitation-controls{display:flex;align-items:center;gap:12px;min-width:0}
-.invitation-controls>.arco-select{flex:1;min-width:0}
+.invitation-controls>.arco-select,.invitation-controls>.invitation-link-input,.invitation-controls>.arco-typography{flex:1;min-width:0}
 .invitation-controls>.arco-btn{flex:none}
 @media (max-width:900px),(hover:none),(pointer:coarse){.arco-tooltip{display:none!important}}
 .ProseMirror a[href]:hover{color:rgb(var(--primary-5))}

@@ -133,12 +133,10 @@ export function TeamSettingsPage({team, user, onMenu, onChanged, onLeave}: {team
               }}>{inviteLink ? '重新生成' : '生成链接'}</Button>
             </div>
             {inviteLink && <Text type="secondary">{inviteLink.status === 'pending' ? `${roleNames[inviteLink.role]} · 已开启 · ${date(inviteLink.expiresAt)}到期` : inviteLink.status === 'expired' ? '已过期' : '已关闭'}</Text>}
-            {inviteLink?.token && <Input aria-label="邀请链接" value={linkFor(inviteLink.token)} readOnly/>}
-            {inviteLink?.status === 'pending' && !inviteLink.token && <Text type="secondary">请重新生成以更新旧版邀请链接。</Text>}
-            {(inviteLink?.token || inviteLink?.status === 'pending') && <Space wrap className="invitation-link-actions">
-              {inviteLink?.token && <Button icon={<Copy size={14}/>} disabled={busy} onClick={() => void copy(linkFor(inviteLink.token!))}>复制链接</Button>}
+            {(inviteLink?.token || inviteLink?.status === 'pending') && <div className="invitation-controls">
+              {inviteLink?.token ? <Input className="invitation-link-input" aria-label="邀请链接" value={linkFor(inviteLink.token)} readOnly suffix={<Button type="text" size="mini" aria-label="复制邀请链接" icon={<Copy size={14}/>} disabled={busy} onClick={() => void copy(linkFor(inviteLink.token!))}/>}/> : <Text type="secondary">请重新生成以更新旧版邀请链接。</Text>}
               {inviteLink?.status === 'pending' && <Button icon={<Unlink size={14}/>} disabled={busy} onClick={() => void run(async () => { await teamApi(team.id, '/invitation-link', 'DELETE'); await refresh(); Message.success('邀请链接已关闭'); })}>关闭链接</Button>}
-            </Space>}
+            </div>}
           </div>
           <div className="account-form"><Text bold>站内邀请</Text>
             <Input aria-label="邀请用户名" placeholder="输入对方完整用户名" value={inviteUsername} onChange={setInviteUsername} disabled={busy}/>
