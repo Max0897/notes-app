@@ -125,6 +125,8 @@ body{overflow:hidden}
 /* ---------- Tiptap 正文基础排版 ---------- */
 .ProseMirror{outline:none;min-height:320px;font-size:14px;line-height:1.8;color:var(--color-text-1)}
 .ProseMirror p{margin:0}
+.ProseMirror a[href]{color:rgb(var(--primary-6));text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.ProseMirror a[href]:hover{color:rgb(var(--primary-5))}
 .ProseMirror{overflow-wrap:anywhere}
 .ProseMirror h2,.ProseMirror h3{margin:16px 0 4px}
 .ProseMirror ul,.ProseMirror ol{padding-left:24px;margin:4px 0}
@@ -182,8 +184,8 @@ ul[data-type="taskList"] input[type="checkbox"]{accent-color:var(--primary-6)}
 .workspace-heading h5{overflow-wrap:anywhere}
 .workspace-scroll{flex:1;min-height:0;overflow:auto;scrollbar-gutter:stable;padding:8px 32px 32px}
 .workspace-content{width:100%;max-width:720px;margin:0 auto;min-width:0}
-.team-settings-tabs{overflow:visible}
-.team-settings-tabs>.arco-tabs-header-nav{position:sticky;top:0;z-index:1;background:var(--color-bg-2)}
+.settings-tabs{overflow:visible}
+.settings-tabs>.arco-tabs-header-nav{position:sticky;top:0;z-index:1;background:var(--color-bg-2)}
 .notification-item{display:flex;flex-direction:column;align-items:flex-start;gap:8px;margin:0 auto;padding:20px 0;border-top:1px solid var(--color-border-2);border-bottom:1px solid var(--color-border-2);min-width:0}
 .notification-item+.notification-item{border-top:0}
 .notification-message{overflow-wrap:anywhere}.notification-meta{font-size:12px;overflow-wrap:anywhere}

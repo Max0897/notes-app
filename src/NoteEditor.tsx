@@ -5,6 +5,7 @@ import {useEditor,EditorContent} from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
+import {EditorLink,openEditorLink} from './editorLinks';
 import {api,ApiError,type Note,type EditorBridge} from './api';
 const {Text,Paragraph}=Typography;
 
@@ -22,7 +23,8 @@ const latest=useRef(note),dirty=useRef(false),timer=useRef<ReturnType<typeof set
 // 最近一次成功入库的正文，用于判断「这次变更是否真的改了内容」
 const savedContent=useRef(canon(note.content));
 const conflictRef=useRef<Note|null>(null);
-const editor=useEditor({extensions:[StarterKit,TaskList,TaskItem.configure({nested:true})],content:note.content,editable:!note.deletedAt&&!readOnly,onUpdate:({editor})=>{
+const editor=useEditor({extensions:[StarterKit,TaskList,TaskItem.configure({nested:true}),EditorLink],editorProps:{handleDOMEvents:{click:(_view,event)=>openEditorLink(event)}},content:note.content,editable:!note.deletedAt&&!readOnly,onUpdate:({editor,transaction})=>{
+  if(!transaction.docChanged)return;
   // Tiptap 在聚焦、选区变化等情况下也会触发 update，此时文档其实没变。
   // 若一律标脏，单纯「点开一篇笔记」就会保存一次并刷新修改时间，笔记随即跳到列表最前。
   if(canon(editor.getJSON())===savedContent.current)return;

@@ -96,7 +96,7 @@ export function TeamSettingsPage({team, user, onMenu, onChanged, onLeave}: {team
   }
   return <>
     <WorkspacePage title={'团队设置 · ' + team.name} onMenu={onMenu} className="team-page" loading={loading}>
-      <Spin loading={loading} style={{display: 'block', minWidth: 0}}><Tabs className="team-settings-tabs" defaultActiveTab="info" overflow="scroll">
+      <Spin loading={loading} style={{display: 'block', minWidth: 0}}><Tabs className="settings-tabs" defaultActiveTab="info" overflow="scroll">
         <Tabs.TabPane key="info" title="基本信息">
           <form className="account-form" onSubmit={event => { event.preventDefault(); void run(async () => { await teamApi(team.id, '', 'PATCH', {name, description}); await onChanged(); Message.success('团队信息已更新'); }); }}>
             <Text type="secondary">你是{roleNames[team.role]} · {members.length} 位成员 · 所有者 {members.find(m => m.role === 'owner')?.username} · 创建于 {date(team.createdAt)}</Text>

@@ -8,12 +8,12 @@ import {SpaceSwitcher} from './SpaceSwitcher';
 import {WorkspacePage} from './WorkspacePage';
 
 const {Text, Title, Paragraph} = Typography;
-const AccountDialog = lazy(() => import('./AccountDialog').then(module => ({default: module.AccountDialog})));
+const AccountPage = lazy(() => import('./AccountPage').then(module => ({default: module.AccountPage})));
 const CreateTeamDialog = lazy(() => import('./TeamViews').then(module => ({default: module.CreateTeamDialog})));
 const InvitationsPage = lazy(() => import('./TeamViews').then(module => ({default: module.InvitationsPage})));
 const TeamSettingsPage = lazy(() => import('./TeamViews').then(module => ({default: module.TeamSettingsPage})));
 const NotificationsPage = lazy(() => import('./NotificationsPage').then(module => ({default: module.NotificationsPage})));
-const pageTitles = {notifications: '通知中心', invitations: '团队邀请', settings: '团队设置'};
+const pageTitles = {notifications: '通知中心', invitations: '团队邀请', settings: '团队设置', account: '账号设置'};
 const date = (value: string) => new Date(value).toLocaleDateString('zh-CN', {month: 'short', day: 'numeric'});
 const Ico = ({Icon, text}: {Icon: typeof FolderIcon; text: string}) => <span className="ico-label"><Icon size={16}/><span>{text}</span></span>;
 function folderMoveMenu(folders: Folder[], currentFolderId: string | null | undefined, disabled = false) {
@@ -35,7 +35,7 @@ export function App() {
   const [notes, setNotes] = useState<Note[]>([]), [folders, setFolders] = useState<Folder[]>([]);
   const [scope, setScope] = useState('all'), [search, setSearch] = useState('');
   const [selected, setSelected] = useState<string | null>(null), [mobile, setMobile] = useState(false);
-  const [loading, setLoading] = useState(true), [drawerOpen, setDrawerOpen] = useState(false), [accountOpen, setAccountOpen] = useState(false);
+  const [loading, setLoading] = useState(true), [drawerOpen, setDrawerOpen] = useState(false);
   const [folderDialog, setFolderDialog] = useState<{mode: 'create' | 'rename'; id?: string; name: string} | null>(null);
   const [moreOpen, setMoreOpen] = useState(false), [checked, setChecked] = useState<string[]>([]), [batchBusy, setBatchBusy] = useState(false);
   const [teamId, setTeamId] = useState<string | null>(null), [teams, setTeams] = useState<Team[]>([]);
@@ -221,11 +221,10 @@ export function App() {
     await safeSwitch(async () => {
       try {
         await api('/auth/logout', 'POST'); setUser(null); setTeamId(null); setTeams([]); setCreateTeamOpen(false); setNotes([]); setFolders([]); setSelected(null);
-        setScope('all'); setSearch(''); setDrawerOpen(false); setAccountOpen(false); setMobile(false); setView('notes'); setUnreadCount(0); resetSelection();
+        setScope('all'); setSearch(''); setDrawerOpen(false); setMobile(false); setView('notes'); setUnreadCount(0); resetSelection();
       } catch (error) { Message.error((error as Error).message); }
     });
   }
-  function openAccount() { void safeSwitch(() => { setDrawerOpen(false); setAccountOpen(true); }); }
   async function submitFolderDialog() {
     const dialog = folderDialog;
     if (!dialog) return;
@@ -320,16 +319,16 @@ export function App() {
     const key = event.key.toLowerCase();
     if (modifier && (key === 's' || event.code === 'KeyS')) {
       event.preventDefault();
-      if (!createTeamOpen && !accountOpen && !folderDialog && !batchBusy && editorRef.current) {
+      if (!createTeamOpen && !folderDialog && !batchBusy && editorRef.current) {
         void editorRef.current.flush().then(ok => { if (ok) Message.success('已保存'); });
       }
-    } else if (modifier && key === 'k' && !event.isComposing && !createTeamOpen && !accountOpen && !folderDialog) {
+    } else if (modifier && key === 'k' && !event.isComposing && !createTeamOpen && !folderDialog) {
       event.preventDefault();
       void safeSwitch(() => {
         setView('notes'); setMobile(false); setDrawerOpen(false);
         requestAnimationFrame(() => document.querySelector<HTMLInputElement>('.note-search input')?.focus());
       });
-    } else if (event.key === 'Escape' && !createTeamOpen && !accountOpen && !folderDialog && !drawerOpen) {
+    } else if (event.key === 'Escape' && !createTeamOpen && !folderDialog && !drawerOpen) {
       if (event.target instanceof Element && event.target.closest('.account-menu, .user-row[aria-expanded="true"]')) return;
       if (contextNoteId) { setContextNoteId(null); event.preventDefault(); }
       else if (moreOpen) setMoreOpen(false);
@@ -375,7 +374,7 @@ export function App() {
       {currentTeam && <Button className="sidebar-action" type="text" long disabled={batchBusy} aria-current={view === 'settings' ? 'page' : undefined} onClick={() => openPage('settings')}><Settings size={17}/><span>团队设置</span></Button>}
       <Button className="sidebar-action" type="text" long disabled={batchBusy} aria-current={view === 'invitations' ? 'page' : undefined} onClick={() => openPage('invitations')}><Mail size={17}/><span>团队邀请</span></Button>
       <Button className="sidebar-action" type="text" long disabled={batchBusy} aria-current={view === 'notifications' ? 'page' : undefined} onClick={() => openPage('notifications')}><Bell size={17}/><span>通知中心</span><Badge count={unreadCount} maxCount={99}/></Button>
-      <AccountMenu user={user} disabled={batchBusy} onSettings={openAccount} onLogout={() => void logout()}/>
+      <AccountMenu user={user} disabled={batchBusy} onSettings={() => openPage('account')} onLogout={() => void logout()}/>
     </div>
   </>;
   const cardKey = (event: ReactKeyboardEvent, note: Note) => {
@@ -396,6 +395,7 @@ export function App() {
     {view !== 'notes' ? <Suspense fallback={<WorkspacePage title={pageTitles[view]} onMenu={() => setDrawerOpen(true)}><Spin tip="正在加载"/></WorkspacePage>}>
       {view === 'notifications' && <NotificationsPage unreadCount={unreadCount} onUnreadChange={setUnreadCount} onMenu={() => setDrawerOpen(true)} onOpenNote={openNotificationNote} onInvitations={() => openPage('invitations')}/>}
       {view === 'invitations' && <InvitationsPage token={inviteToken} teams={teams} onMenu={() => setDrawerOpen(true)} onLinkHandled={clearInviteToken} onChanged={async () => { await loadSpaces(); }}/>}
+      {view === 'account' && <AccountPage user={user} onUserChange={updated => setUser(previous => previous?.id === updated.id ? updated : previous)} onMenu={() => setDrawerOpen(true)}/>}
       {view === 'settings' && currentTeam && <TeamSettingsPage key={currentTeam.id} team={currentTeam} user={user} onMenu={() => setDrawerOpen(true)} onChanged={teamChanged} onLeave={teamLeft}/>}
     </Suspense> : <><section className="note-list">
       <div className="note-list-head">
@@ -459,6 +459,5 @@ export function App() {
     {createTeamOpen && <CreateTeamDialog onClose={() => setCreateTeamOpen(false)} onCreated={async team => { await loadSpaces(); resetWorkspace(team.id); }}/>}
     </Suspense>
     <Modal title="访问权限已变化，本地草稿尚未保存" visible={!!draft} footer={null} maskClosable={false} onCancel={() => setDraft('')} style={{maxWidth: 'calc(100vw - 32px)'}}><div className="account-form"><Text>请复制保留需要的内容。草稿不会自动写入其他空间。</Text><Input.TextArea aria-label="待保留的本地草稿" value={draft} readOnly autoSize={{minRows: 6, maxRows: 14}}/><Button type="primary" onClick={() => { void navigator.clipboard.writeText(draft).then(() => Message.success('草稿已复制')).catch(() => Message.info('请手动选择并复制草稿')); }}>复制草稿</Button></div></Modal>
-    {accountOpen && <Suspense fallback={null}><AccountDialog user={user} onUserChange={setUser} onClose={() => setAccountOpen(false)}/></Suspense>}
   </div>;
 }

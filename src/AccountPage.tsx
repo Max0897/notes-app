@@ -1,10 +1,11 @@
 import {useEffect, useState} from 'react';
-import {Alert, Button, Input, Message, Modal, Tabs, Typography} from '@arco-design/web-react';
+import {Alert, Button, Input, Message, Tabs, Typography} from '@arco-design/web-react';
 import {RefreshCw} from 'lucide-react';
 import {api, type User} from './api';
 import {UserAvatar} from './UserAvatar';
+import {WorkspacePage} from './WorkspacePage';
 
-export function AccountDialog({user, onUserChange, onClose}: {user: User; onUserChange: (user: User) => void; onClose: () => void}) {
+export function AccountPage({user, onUserChange, onMenu}: {user: User; onUserChange: (user: User) => void; onMenu: () => void}) {
   const {username} = user;
   const [avatarSeed, setAvatarSeed] = useState(user.avatarSeed);
   const [avatarBusy, setAvatarBusy] = useState(false);
@@ -50,10 +51,9 @@ export function AccountDialog({user, onUserChange, onClose}: {user: User; onUser
     finally { setBusy(false); }
   }
 
-  return <Modal title="账号设置" visible onCancel={() => { if (!busy && !avatarBusy) onClose(); }}
-    footer={null} maskClosable={false} style={{width: 440, maxWidth: 'calc(100vw - 32px)'}}>
+  return <WorkspacePage title="账号设置" onMenu={onMenu}>
     <Typography.Paragraph>当前账号：<Typography.Text bold>{username}</Typography.Text></Typography.Paragraph>
-    <Tabs defaultActiveTab="avatar">
+    <Tabs className="settings-tabs" defaultActiveTab="avatar" overflow="scroll">
       <Tabs.TabPane key="avatar" title="头像" disabled={busy}>
         <div className="avatar-settings">
           <div className="avatar-preview"><UserAvatar user={{...user, avatarSeed}} size={96} label="头像预览"/></div>
@@ -85,5 +85,5 @@ export function AccountDialog({user, onUserChange, onClose}: {user: User; onUser
         </form>
       </Tabs.TabPane>
     </Tabs>
-  </Modal>;
+  </WorkspacePage>;
 }
