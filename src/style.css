@@ -145,6 +145,7 @@ body{overflow:hidden}
 .invitation-controls{display:flex;align-items:center;gap:12px;min-width:0}
 .invitation-controls>.arco-select,.invitation-controls>.invitation-link-input,.invitation-controls>.arco-typography{flex:1;min-width:0}
 .invitation-controls>.arco-btn{flex:none}
+.activity-pagination{justify-content:flex-end;margin-top:20px}
 @media (max-width:900px),(hover:none),(pointer:coarse){.arco-tooltip{display:none!important}}
 .ProseMirror a[href]:hover{color:rgb(var(--primary-5))}
 .ProseMirror{overflow-wrap:anywhere}

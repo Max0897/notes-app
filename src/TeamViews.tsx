@@ -1,5 +1,5 @@
 import {useEffect, useRef, useState} from 'react';
-import {Alert, Button, Empty, Input, Message, Modal, Select, Space, Spin, Tabs, Tag, Typography} from '@arco-design/web-react';
+import {Alert, Button, Empty, Input, Message, Modal, Pagination, Select, Spin, Tabs, Tag, Typography} from '@arco-design/web-react';
 import {Copy, Link2, RefreshCw, RotateCcw, Unlink} from 'lucide-react';
 import {api, teamApi, isManager, roleNames, type Team, type TeamRole, type Folder, type User} from './api';
 import {UserAvatar} from './UserAvatar';
@@ -73,14 +73,14 @@ export function TeamSettingsPage({team, user, onMenu, onChanged, onLeave}: {team
   const [inviteUsername, setInviteUsername] = useState(''), [inviteRole, setInviteRole] = useState<TeamRole>('viewer');
   const [inviteLink, setInviteLink] = useState<InvitationLink | null>(null), [linkRole, setLinkRole] = useState<TeamRole>('viewer');
   const [folders, setFolders] = useState<Folder[]>([]), [folderId, setFolderId] = useState(''), [mode, setMode] = useState('team'), [grants, setGrants] = useState<Record<string, string>>({}), [affected, setAffected] = useState(0);
-  const [activityNext, setActivityNext] = useState<number | null>(null);
+  const [activityPage, setActivityPage] = useState(1), [activityTotal, setActivityTotal] = useState(0);
   const [activities, setActivities] = useState<{id: number; username: string; action: string; objectName: string; nickname?: string; createdAt: string}[]>([]);
   const [dissolve, setDissolve] = useState(false), [confirmName, setConfirmName] = useState(''), [password, setPassword] = useState('');
   const [loading, setLoading] = useState(true); const {busy, run} = useTask(); const manage = isManager(team);
   async function refresh() {
     const [people, folderData] = await Promise.all([teamApi(team.id, '/members'), teamApi(team.id, '/folders')]);
     setMembers(people.members); setFolders(folderData.folders);
-    if (manage) { const [invitations, log, link] = await Promise.all([teamApi(team.id, '/invitations'), teamApi(team.id, '/activity'), teamApi(team.id, '/invitation-link')]); setInvites(invitations.invitations); setActivities(log.activities); setActivityNext(log.next); setInviteLink(link.link); setLinkRole(link.link?.role ?? 'viewer'); }
+    if (manage) { const [invitations, log, link] = await Promise.all([teamApi(team.id, '/invitations'), teamApi(team.id, '/activity?page=1&pageSize=20'), teamApi(team.id, '/invitation-link')]); setInvites(invitations.invitations); setActivities(log.activities); setActivityPage(log.page); setActivityTotal(log.total); setInviteLink(link.link); setLinkRole(link.link?.role ?? 'viewer'); }
   }
   useEffect(() => { void refresh().catch(errorMessage).finally(() => setLoading(false)); }, [team.id, manage]);
   useEffect(() => {
@@ -165,7 +165,7 @@ export function TeamSettingsPage({team, user, onMenu, onChanged, onLeave}: {team
         {manage && <Tabs.TabPane key="activity" title="活动记录">
           {!activities.length && <Empty description="暂无活动记录"/>}
           {activities.map(a => <div key={a.id} className="team-entry"><Text>{a.nickname || a.username} · {a.action}</Text><Text type="secondary">{a.objectName} · {date(a.createdAt)}</Text></div>)}
-          {activityNext && <Button disabled={busy} onClick={() => void run(async () => { const d = await teamApi(team.id, '/activity?before=' + activityNext); setActivities(previous => [...previous, ...d.activities]); setActivityNext(d.next); })}>加载更多记录</Button>}
+          {activityTotal > 0 && <Pagination className="activity-pagination" simple size="small" current={activityPage} pageSize={20} total={activityTotal} showTotal disabled={busy} onChange={page => void run(async () => { const data = await teamApi(team.id, '/activity?page=' + page + '&pageSize=20'); setActivities(data.activities); setActivityPage(data.page); setActivityTotal(data.total); })}/>}
         </Tabs.TabPane>}
       </Tabs></Spin>
     </WorkspacePage>

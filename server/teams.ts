@@ -48,6 +48,7 @@ export function initCollaboration(db: Database.Database) {
       id INTEGER PRIMARY KEY AUTOINCREMENT, team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
       actor_id TEXT NOT NULL REFERENCES users(id), action TEXT NOT NULL, object_name TEXT NOT NULL, created_at TEXT NOT NULL
     );
+    CREATE INDEX IF NOT EXISTS activity_logs_team ON activity_logs(team_id,id DESC);
     CREATE TABLE IF NOT EXISTS team_presence (
       team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE, user_id TEXT NOT NULL REFERENCES users(id),
       note_id TEXT NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(team_id,user_id)
@@ -119,6 +120,12 @@ export function registerCollaboration(app: Hono<AppEnv>, db: Database.Database, 
   function audit(c: AppContext, t: Row, action: string, object: string) {
     db.prepare('INSERT INTO activity_logs(team_id,actor_id,action,object_name,created_at) VALUES(?,?,?,?,?)').run(t.id, uid(c), action, object.slice(0, 240), now());
     db.prepare('UPDATE teams SET revision=revision+1 WHERE id=?').run(t.id);
+  }
+  const roleLabels: Record<Role, string> = {owner: '所有者', admin: '管理员', editor: '编辑者', viewer: '查看者'};
+  function memberLabel(userId: string) {
+    const user = db.prepare('SELECT username,nickname FROM users WHERE id=?').get(userId) as Row | undefined;
+    if (!user) return '原成员';
+    return user.nickname && user.nickname !== user.username ? `${user.nickname}（@${user.username}）` : user.username;
   }
   function folder(t: Row, folderId: string | null, includeDeleted = true): Row | null {
     if (folderId === null) return null;
@@ -237,7 +244,7 @@ export function registerCollaboration(app: Hono<AppEnv>, db: Database.Database, 
       db.prepare('UPDATE team_members SET role=? WHERE team_id=? AND user_id=?').run(body.role, t.id, target);
       db.prepare('DELETE FROM team_presence WHERE team_id=? AND user_id=?').run(t.id, target);
       if (!manager(body.role as Role)) db.prepare("UPDATE team_invitations SET status='revoked' WHERE team_id=? AND created_by=? AND status='pending'").run(t.id, target);
-      audit(c, t, '调整成员角色', `${target} → ${body.role}`);
+      audit(c, t, '调整成员角色', `${memberLabel(target)}：${roleLabels[m.role as Role]} → ${roleLabels[body.role as Role]}`);
     })(); return c.json({ok: true});
   });
   function removeMember(c: AppContext, t: Row & {role: Role}, target: string) {
@@ -493,10 +500,18 @@ export function registerCollaboration(app: Hono<AppEnv>, db: Database.Database, 
     db.transaction(() => { const t = team(c, 'manage'), n = note(c, t, c.req.param('id')); if (!n.deleted_at) fail(400, '只能永久删除最近删除中的资料'); db.prepare('DELETE FROM notes WHERE id=? AND space_id=?').run(n.id, t.id); audit(c, t, '永久删除备忘录', n.title); })(); return c.json({ok: true});
   });
   app.get('/api/teams/:teamId/activity', c => {
-    const t = team(c, 'manage'); const before = Number(c.req.query('before') ?? Number.MAX_SAFE_INTEGER);
-    if (!Number.isSafeInteger(before) || before < 1) fail(400, '分页参数无效');
-    const rows = db.prepare("SELECT a.id,a.action,a.object_name AS objectName,a.created_at AS createdAt,u.username,COALESCE(NULLIF(u.nickname,''),u.username) AS nickname FROM activity_logs a JOIN users u ON u.id=a.actor_id WHERE a.team_id=? AND a.id<? ORDER BY a.id DESC LIMIT 200").all(t.id, before) as Row[];
-    return c.json({activities: rows, next: rows.length === 200 ? rows[rows.length - 1].id : null});
+    const t = team(c, 'manage'), pageSize = Number(c.req.query('pageSize') ?? 20), requestedPage = Number(c.req.query('page') ?? 1);
+    const before = Number(c.req.query('before') ?? Number.MAX_SAFE_INTEGER);
+    if (!Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 100 || !Number.isSafeInteger(requestedPage) || requestedPage < 1 || !Number.isSafeInteger(before) || before < 1 || c.req.query('before') && c.req.query('page')) fail(400, '分页参数无效');
+    const total = (db.prepare('SELECT COUNT(*) AS n FROM activity_logs WHERE team_id=? AND id<?').get(t.id, before) as Row).n as number;
+    const page = Math.min(requestedPage, Math.max(1, Math.ceil(total / pageSize)));
+    const rows = db.prepare("SELECT a.id,a.action,a.object_name AS objectName,a.created_at AS createdAt,u.username,COALESCE(NULLIF(u.nickname,''),u.username) AS nickname FROM activity_logs a JOIN users u ON u.id=a.actor_id WHERE a.team_id=? AND a.id<? ORDER BY a.id DESC LIMIT ? OFFSET ?").all(t.id, before, pageSize, (page - 1) * pageSize) as Row[];
+    for (const row of rows) {
+      if (row.action !== '调整成员角色') continue;
+      const legacy = /^([0-9a-f-]{36}) → (owner|admin|editor|viewer)$/i.exec(row.objectName);
+      if (legacy) row.objectName = `${memberLabel(legacy[1])} → ${roleLabels[legacy[2].toLowerCase() as Role]}`;
+    }
+    return c.json({activities: rows, total, page, pageSize, next: page * pageSize < total ? rows[rows.length - 1].id : null});
   });
   app.post('/api/teams/:teamId/notes/:id/presence', async c => {
     const body = await readBody(c, ['active']);

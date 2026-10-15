@@ -231,6 +231,38 @@ test('每人一个邀请链接：重复复制、关闭、重新生成、权限�
   } finally { restoredDb.close(); }
 });
 
+test('活动记录：20 条分页、边界与权限、成员角色中文展示及历史 UUID 兼容', {timeout: 60000}, async t => {
+  const {r, owner, editor, viewer, outsider, team, base, dataDir, cleanups} = await setup(t);
+  const db = new Database(resolve(dataDir, 'notes.sqlite')); cleanups.push(() => db.close());
+  await r(editor, '/auth/profile', 'PATCH', {nickname: '小明'});
+  await r(owner, base + '/members/' + editor.json.user.id, 'PATCH', {role: 'viewer'});
+  await r(owner, base + '/members/' + editor.json.user.id, 'PATCH', {role: 'editor'});
+  const changed = db.prepare("SELECT * FROM activity_logs WHERE team_id=? AND action='调整成员角色' ORDER BY id DESC LIMIT 1").get(team.id);
+  assert.equal(changed.object_name, '小明（@team-editor）：查看者 → 编辑者');
+  assert.ok(!changed.object_name.includes(editor.json.user.id));
+  const insert = db.prepare('INSERT INTO activity_logs(team_id,actor_id,action,object_name,created_at) VALUES(?,?,?,?,?)');
+  const legacy = insert.run(team.id, owner.json.user.id, '调整成员角色', editor.json.user.id + ' → editor', new Date().toISOString()).lastInsertRowid;
+  db.transaction(() => { for (let i = 0; i < 43; i++) insert.run(team.id, owner.json.user.id, '创建备忘录', '记录 ' + i, new Date().toISOString()); })();
+  await r(owner, '/teams', 'POST', {name: '另一个团队'}, 201);
+  const expected = db.prepare('SELECT id FROM activity_logs WHERE team_id=? ORDER BY id DESC').all(team.id).map(row => row.id);
+  const first = await r(owner, base + '/activity');
+  assert.equal(first.activities.length, 20); assert.equal(first.page, 1); assert.equal(first.pageSize, 20); assert.equal(first.total, expected.length);
+  const pages = [first];
+  for (let page = 2; page <= Math.ceil(first.total / 20); page++) pages.push(await r(owner, base + '/activity?page=' + page + '&pageSize=20'));
+  assert.deepEqual(pages.flatMap(page => page.activities.map(row => row.id)), expected);
+  assert.equal(pages.at(-1).next, null);
+  assert.equal(pages.flatMap(page => page.activities).find(row => row.id === legacy).objectName, '小明（@team-editor） → 编辑者');
+  assert.equal(db.prepare('SELECT object_name FROM activity_logs WHERE id=?').get(legacy).object_name, editor.json.user.id + ' → editor', '历史格式只在返回时转换，保留原始审计记录');
+  const last = await r(owner, base + '/activity?page=999');
+  assert.deepEqual(last.activities, pages.at(-1).activities); assert.equal(last.page, pages.length);
+  assert.equal((await r(owner, base + '/activity?pageSize=100')).activities.length, expected.length);
+  const cursor = await r(owner, base + '/activity?before=' + first.next);
+  assert.deepEqual(cursor.activities.map(row => row.id), pages[1].activities.map(row => row.id));
+  for (const query of ['page=0', 'page=-1', 'page=no', 'pageSize=0', 'pageSize=101', 'pageSize=1.5', 'before=no', 'before=1&page=1']) await r(owner, base + '/activity?' + query, 'GET', undefined, 400);
+  for (const who of [editor, viewer]) await r(who, base + '/activity', 'GET', undefined, 403);
+  await r(outsider, base + '/activity', 'GET', undefined, 404);
+});
+
 test('文件夹 ACL：列表、直接访问、角色上限、事务回滚及删除恢复保留原范围', {timeout: 60000}, async t => {
   const {r, owner, editor, viewer, outsider, base, note, patch, folder} = await setup(t);
   const secret = await folder('受限资料'), publicFolder = await folder('公开资料');
