@@ -1,12 +1,15 @@
-import {forwardRef,useEffect,useImperativeHandle,useRef,useState} from 'react';
-import {Alert,Button,Message,Space,Tag,Tooltip,Typography} from '@arco-design/web-react';
-import {Bold,Check,Heading2,Italic,List as ListIcon,ListChecks,ListOrdered,Redo2,Undo2} from 'lucide-react';
+import {forwardRef,lazy,Suspense,useEffect,useImperativeHandle,useRef,useState} from 'react';
+import {Alert,Button,Message,Space,Tag,Typography} from '@arco-design/web-react';
+import {Check} from 'lucide-react';
 import {useEditor,EditorContent} from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
 import {EditorLink,openEditorLink} from './editorLinks';
 import {api,ApiError,type Note,type EditorBridge} from './api';
+import type {User} from './api';
+import {EditorTools} from './EditorTools';
+const TeamNoteEditor=lazy(()=>import('./TeamNoteEditor').then(module=>({default:module.TeamNoteEditor})));
 const {Text,Paragraph}=Typography;
 
 // 结构化比较，忽略对象键顺序差异（数据库里存的 JSON 与 Tiptap 重新序列化的键序可能不同）
@@ -16,7 +19,7 @@ function canon(v:any):string{
   return JSON.stringify(v);
 }
 
-export const NoteEditor=forwardRef<EditorBridge,{note:Note;onSave:(n:Note)=>void;readOnly?:boolean;teamId?:string|null;activeEditors?:string[]}>(function NoteEditor({note,onSave,readOnly=false,teamId,activeEditors=[]},bridge){
+const SavedNoteEditor=forwardRef<EditorBridge,{note:Note;onSave:(n:Note)=>void;readOnly?:boolean;teamId?:string|null;activeEditors?:string[]}>(function SavedNoteEditor({note,onSave,readOnly=false,teamId,activeEditors=[]},bridge){
 const noteApi=(path:string,method='GET',body?:any)=>api((teamId?'/teams/'+teamId:'')+path,method,body);
 const [title,setTitle]=useState(note.title),[status,setStatus]=useState('已保存'),[conflict,setConflict]=useState<Note|null>(null);
 const latest=useRef(note),dirty=useRef(false),timer=useRef<ReturnType<typeof setTimeout>>(),revision=useRef(0),pending=useRef<Promise<boolean>|null>(null);
@@ -38,11 +41,10 @@ useImperativeHandle(bridge,()=>({flush,snapshot:()=>latest.current,hasChanges:()
 useEffect(()=>()=>clearTimeout(timer.current),[]);
 useEffect(()=>{editor?.setEditable(!note.deletedAt&&!readOnly);if(dirty.current&&note.version>latest.current.version&&!conflictRef.current)setStatus('其他成员已更新，保存时将检查冲突');if(!dirty.current&&!pending.current){latest.current=note;titleRef.current=note.title;setTitle(note.title);if(editor&&canon(editor.getJSON())!==canon(note.content))editor.commands.setContent(note.content,false);savedContent.current=canon(note.content);}},[note,editor,readOnly]);
 useEffect(()=>{const warn=(e:BeforeUnloadEvent)=>{if(dirty.current){e.preventDefault();e.returnValue='';}};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn);},[]);
-const tools=[{label:'标题',icon:<Heading2 size={16}/>,active:editor?.isActive('heading',{level:2}),run:()=>editor?.chain().focus().toggleHeading({level:2}).run()},{label:'粗体',icon:<Bold size={16}/>,active:editor?.isActive('bold'),run:()=>editor?.chain().focus().toggleBold().run()},{label:'斜体',icon:<Italic size={16}/>,active:editor?.isActive('italic'),run:()=>editor?.chain().focus().toggleItalic().run()},{label:'无序列表',icon:<ListIcon size={16}/>,active:editor?.isActive('bulletList'),run:()=>editor?.chain().focus().toggleBulletList().run()},{label:'有序列表',icon:<ListOrdered size={16}/>,active:editor?.isActive('orderedList'),run:()=>editor?.chain().focus().toggleOrderedList().run()},{label:'待办清单',icon:<ListChecks size={16}/>,active:editor?.isActive('taskList'),run:()=>editor?.chain().focus().toggleTaskList().run()},{label:'撤销',icon:<Undo2 size={16}/>,run:()=>editor?.chain().focus().undo().run()},{label:'重做',icon:<Redo2 size={16}/>,run:()=>editor?.chain().focus().redo().run()}];
 const collaborationText=teamId?[note.modifiedBy&&'最后修改：'+note.modifiedBy,activeEditors.length>0&&activeEditors.join('、')+' 正在编辑'].filter(Boolean).join(' · '):'';
 return <>
 <div className="format-bar">
-  <Space className="format-tools" size={4}>{tools.map(t=><Tooltip key={t.label} content={t.label}><Button size="small" type={t.active?'secondary':'text'} disabled={!!note.deletedAt||readOnly} aria-label={t.label} icon={t.icon} onClick={t.run}/></Tooltip>)}</Space>
+  <EditorTools editor={editor} disabled={!!note.deletedAt||readOnly}/>
   <div className="editor-save-info">
     {teamId&&<div className="editor-collaboration-info">{collaborationText&&<Text type="secondary" title={collaborationText}>{collaborationText}</Text>}{note.canEdit===false&&<Tag size="small">只读</Tag>}</div>}
     <Button title={status+' · 立即保存（Ctrl / ⌘ + S）'} className="save-status" type="text" size="mini" onClick={()=>void flush()} icon={status==='已保存'?<Check size={14}/>:undefined}>{status}</Button>
@@ -63,4 +65,10 @@ return <>
 </div></div>
 <div className="editor-footer"><Text type="secondary">{editor?.getText().length||0} 字</Text><Text type="secondary">{note.deletedAt?'已移入最近删除，可恢复':readOnly?'只读':'自动保存已开启'}</Text></div>
 </>;
+});
+
+export const NoteEditor=forwardRef<EditorBridge,{note:Note;onSave:(n:Note)=>void;user:User;readOnly?:boolean;teamId?:string|null}>(function NoteEditor(props,bridge){
+  return props.teamId&&!props.note.deletedAt
+    ? <Suspense fallback={<div className="editor-empty" role="status">正在加载协作编辑器…</div>}><TeamNoteEditor {...props} teamId={props.teamId} ref={bridge}/></Suspense>
+    : <SavedNoteEditor {...props} ref={bridge}/>;
 });

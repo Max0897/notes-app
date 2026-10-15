@@ -41,7 +41,6 @@ export function App() {
   const [teamId, setTeamId] = useState<string | null>(null), [teams, setTeams] = useState<Team[]>([]);
   const [createTeamOpen, setCreateTeamOpen] = useState(false);
   const [inviteToken, setInviteToken] = useState<string | null>(null), [draft, setDraft] = useState('');
-  const [editors, setEditors] = useState<{noteId: string; username: string}[]>([]);
   const [view, setView] = useState<'notes' | keyof typeof pageTitles>('notes'), [unreadCount, setUnreadCount] = useState(0);
   const currentTeam = teams.find(t => t.id === teamId && !t.deletedAt);
   const manageFolders = !teamId || isManager(currentTeam);
@@ -59,7 +58,7 @@ export function App() {
   const workspaceApi = (path: string, method = 'GET', body?: any) => api((teamId ? '/teams/' + teamId : '') + path, method, body);
   async function loadSpaces() { const data = await api('/spaces'); setTeams(data.teams); return data.teams as Team[]; }
   function preserveDraft() { if (editorRef.current?.hasChanges()) setDraft(editorRef.current.draft()); }
-  function resetWorkspace(id: string | null) { setTeamId(id); setNotes([]); setFolders([]); setSelected(null); setScope('all'); setSearch(''); setMobile(false); setDrawerOpen(false); setCreateTeamOpen(false); setView('notes'); setEditors([]); resetSelection(); setLoading(true); }
+  function resetWorkspace(id: string | null) { setTeamId(id); setNotes([]); setFolders([]); setSelected(null); setScope('all'); setSearch(''); setMobile(false); setDrawerOpen(false); setCreateTeamOpen(false); setView('notes'); resetSelection(); setLoading(true); }
   async function switchWorkspace(id: string | null) { if (id !== teamId || view !== 'notes') await safeSwitch(() => { if (id !== teamId) resetWorkspace(id); setView('notes'); }); }
   async function teamChanged() { await loadSpaces(); if (teamId) await reload(); }
   async function teamLeft() { preserveDraft(); resetWorkspace(null); await loadSpaces(); }
@@ -98,7 +97,7 @@ export function App() {
   const revokedHandler = useRef<() => void>();
   const connectionErrorHandler = useRef<() => void>();
   eventHandler.current = event => {
-    const payload = JSON.parse(event.data); setEditors(payload.editors ?? []);
+    const payload = JSON.parse(event.data);
     if (!payload.changed || !teamId) return;
     const id = teamId;
     void Promise.all([workspaceApi('/notes'), workspaceApi('/folders'), api('/spaces')]).then(([a, b, c]) => {
@@ -126,13 +125,6 @@ export function App() {
     events.addEventListener('revoked', () => { events.close(); revokedHandler.current?.(); });
     return () => events.close();
   }, [userId, teamId]);
-  useEffect(() => {
-    if (view !== 'notes' || !teamId || !selected || !current?.canEdit || current.deletedAt) return;
-    const path = '/teams/' + teamId + '/notes/' + selected + '/presence';
-    const beat = () => { void api(path, 'POST', {active: true}).catch(() => {}); }; beat();
-    const timer = setInterval(beat, 15000);
-    return () => { clearInterval(timer); void api(path, 'POST', {active: false}).catch(() => {}); };
-  }, [teamId, selected, current?.canEdit, current?.deletedAt, view]);
 
   async function auth(event: FormEvent) {
     event.preventDefault(); setAuthBusy(true);
@@ -450,7 +442,7 @@ export function App() {
           <Tooltip content="移到最近删除"><Button aria-label="移到最近删除" size="small" type="text" status="danger" disabled={batchBusy || current.canEdit === false} icon={<Trash2 size={16}/>} onClick={() => void mutate({deletedAt: new Date().toISOString()})}/></Tooltip>
         </>}
       </Space></div>
-      <NoteEditor teamId={teamId} activeEditors={editors.filter(e => e.noteId === current.id).map(e => e.username)} key={(teamId ?? 'personal') + current.id} note={current} onSave={upsert} ref={editorRef} readOnly={batchBusy || current.canEdit === false}/>
+      <NoteEditor user={user!} teamId={teamId} key={(teamId ?? 'personal') + current.id} note={current} onSave={upsert} ref={editorRef} readOnly={batchBusy || current.canEdit === false}/>
     </> : <div className="editor-empty"><Empty description="留一点空间，给灵感"/><Button type="primary" icon={<Plus size={16}/>} disabled={!canCreate} onClick={() => void newNote()}>新建备忘录</Button></div>}</main></>}
     <Modal title={folderDialog?.mode === 'rename' ? '重命名文件夹' : '新建文件夹'} visible={!!folderDialog} onOk={submitFolderDialog} onCancel={() => setFolderDialog(null)} maskClosable={false} style={{maxWidth: 'calc(100vw - 32px)'}}>
       <Input autoFocus placeholder="请输入文件夹名称" maxLength={60} value={folderDialog?.name || ''} onChange={name => setFolderDialog(previous => previous ? {...previous, name} : null)} onPressEnter={() => { void submitFolderDialog().catch(() => {}); }}/>

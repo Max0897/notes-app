@@ -13,6 +13,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import {initCollaboration, registerCollaboration} from './teams.js';
 import {initNotifications, registerNotifications} from './notifications.js';
+import {createRealtime} from './realtime.js';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const production = process.env.NODE_ENV === 'production';
@@ -297,6 +298,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS notes_user_folder ON notes(user_id, folder_id);
 `);
 const collaboration = initCollaboration(db);
+const realtime = createRealtime(db, {cookieName: COOKIE_NAME, publicOrigin, validateContent});
 initNotifications(db);
 collaboration.cleanup();
 const deleteExpiredSessions = db.prepare('DELETE FROM sessions WHERE expires_at <= ?');
@@ -448,6 +450,8 @@ app.use('/api/*', async (c, next) => {
     if (!sameOrigin) return c.json({ error: '写操作必须来自同源页面，Origin 须与 Host 一致' }, 403);
   }
   await next();
+  // Revoke live sockets before any subsequent broadcasts after an API mutation.
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(c.req.method)) realtime.revalidate();
 });
 app.use('/api/*', (c, next) => bodyLimit({maxSize: MAX_BODY_BYTES, onError: ctx => ctx.json({error: '请求正文超过大小限制'}, 413)})(c, next));
 const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
@@ -752,8 +756,10 @@ if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('PORT �
 const server = serve({ fetch: app.fetch, hostname: host, port }, (info) => {
   console.log(`记事本后端已启动，监听 ${host}:${info.port}`);
 });
-function shutdown() {
+realtime.attach(server as import('node:http').Server);
+async function shutdown() {
   clearInterval(maintenance);
+  await realtime.close();
   server.close(() => { db.close(); });
 }
 process.once('SIGINT', shutdown);

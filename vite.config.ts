@@ -1,3 +1,3 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-export default defineConfig({plugins:[react()],server:{host:'localhost',proxy:{'/api':{target:'http://127.0.0.1:3000',changeOrigin:false}}},build:{chunkSizeWarningLimit:900}});
+export default defineConfig({plugins:[react()],server:{host:'localhost',proxy:{'/api':{target:'http://127.0.0.1:3000',changeOrigin:false,ws:true}}},build:{chunkSizeWarningLimit:900}});

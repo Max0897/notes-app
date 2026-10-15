@@ -381,6 +381,7 @@ export function registerCollaboration(app: Hono<AppEnv>, db: Database.Database, 
       const t = team(c), n = note(c, t, c.req.param('id'), true);
       if (!Number.isSafeInteger(body.version) || Number(body.version) < 1) fail(400, '版本无效');
       if (body.version !== n.version) return {conflict: true, note: noteDto(c, t, n)};
+      if (['title', 'content', 'plainText'].some(key => key in body) && db.prepare('SELECT 1 FROM collaboration_documents WHERE note_id=?').get(n.id)) fail(409, '此备忘录已启用实时协作，请刷新后通过协作编辑器修改');
       if (folder(t, n.folder_id)?.deleted_at) fail(409, '请先恢复所属文件夹');
       const updates: Row = {};
       if ('title' in body) { if (typeof body.title !== 'string' || body.title.length > 200) fail(400, '标题不能超过 200 字'); updates.title = body.title; }
