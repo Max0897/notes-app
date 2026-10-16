@@ -16,6 +16,7 @@ import {initNotifications, registerNotifications} from './notifications.js';
 import {createRealtime} from './realtime.js';
 import {initNotebook, registerNotebook} from './notebook.js';
 import {initImages, MAX_IMAGE_BYTES} from './images.js';
+import {isValidNewUsername, USERNAME_RULE} from './username.js';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const production = process.env.NODE_ENV === 'production';
@@ -101,10 +102,12 @@ async function readBody(c: AppContext, allowed: readonly string[]): Promise<Json
   onlyKeys(value, allowed, '请求包含不支持的字段');
   return value;
 }
-function credentials(body: JsonObject) {
+function credentials(body: JsonObject, registration = false) {
   if (typeof body.username !== 'string' || typeof body.password !== 'string') {
     invalid('请提供用户名和密码');
   }
+  if (registration && !isValidNewUsername(body.username)) invalid(USERNAME_RULE);
+  // Preserve legacy account lookup without relaxing validation for new names.
   const username = body.username.trim().normalize('NFC');
   const length = Array.from(username).length;
   if (length < 3 || length > 32 || /[\u0000-\u001f\u007f-\u009f]/u.test(username)) {
@@ -488,7 +491,7 @@ app.get('/api/health', (c) => c.json({ ok: true, uptime: Math.round(process.upti
 
 app.post('/api/auth/register', async (c) => {
   const body = await readBody(c, ['username', 'password', 'nickname']);
-  const { username, usernameKey, password } = credentials(body);
+  const { username, usernameKey, password } = credentials(body, true);
   const nickname = nicknameValue(body.nickname, username);
   const id = randomUUID();
   const user: User = { id, username, nickname, avatarStyle: 'cutouts', avatarSeed: id };

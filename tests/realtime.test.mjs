@@ -41,7 +41,7 @@ async function fixture(t) {
     return {...json, cookie: response.headers.get('set-cookie')?.split(';')[0]};
   }
   const register = username => request(null, '/auth/register', 'POST', {username, password: 'Realtime-test-2026'}, 201);
-  const owner = await register('collab-owner'), editor = await register('collab-editor'), viewer = await register('collab-viewer'), outsider = await register('collab-outsider');
+  const owner = await register('collab_owner'), editor = await register('collab_editor'), viewer = await register('collab_viewer'), outsider = await register('collab_outsider');
   const {team} = await request(owner, '/teams', 'POST', {name: '实时协作测试'}, 201);
   const base = '/teams/' + team.id;
   for (const [who, role] of [[editor, 'editor'], [viewer, 'viewer']]) {

@@ -35,7 +35,7 @@ async function fixture(t) {
   }
   const password = 'Notifications-test-2026';
   const register = username => r(null, '/auth/register', 'POST', {username, password}, 201);
-  const owner = await register('notifications-owner'), viewer = await register('notifications-viewer'), outsider = await register('notifications-outsider');
+  const owner = await register('notifications_owner'), viewer = await register('notifications_viewer'), outsider = await register('notifications_outsider');
   async function team() {
     const team = (await r(owner, '/teams', 'POST', {name: '通知测试团队'}, 201)).team;
     const base = '/teams/' + team.id;

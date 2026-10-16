@@ -49,8 +49,8 @@ async function fixture(t) {
     const response = await raw(who, path + '/images', 'POST', form); const result = await response.json();
     assert.equal(response.status, status, JSON.stringify(result)); return result.image;
   }
-  const owner = await request(null, '/auth/register', 'POST', {username: 'image-owner', password: 'Image-test-2026'}, 201);
-  const outsider = await request(null, '/auth/register', 'POST', {username: 'image-outsider', password: 'Image-test-2026'}, 201);
+  const owner = await request(null, '/auth/register', 'POST', {username: 'image_owner', password: 'Image-test-2026'}, 201);
+  const outsider = await request(null, '/auth/register', 'POST', {username: 'image_outsider', password: 'Image-test-2026'}, 201);
   const png = await sharp({create: {width: 32, height: 24, channels: 4, background: '#1598ea80'}}).png().toBuffer();
   db = new Database(resolve(dataDir, 'notes.sqlite')); db.pragma('foreign_keys=ON');
   const store = initImages(db, dataDir, ApiError);
@@ -151,7 +151,7 @@ test('图片清理：正文移除、历史恢复、跨文档引用、回收站�
 
 test('团队图片：查看/编辑与文件夹授权、撤权和移动、跨空间及无权引用检查', {timeout: 60000}, async t => {
   const f = await fixture(t), {team} = await f.request(f.owner, '/teams', 'POST', {name: '图片协作'}, 201), base = '/teams/' + team.id;
-  const editor = await f.request(null, '/auth/register', 'POST', {username: 'image-editor', password: 'Image-test-2026'}, 201);
+  const editor = await f.request(null, '/auth/register', 'POST', {username: 'image_editor', password: 'Image-test-2026'}, 201);
   for (const [who, role] of [[editor, 'editor'], [f.outsider, 'viewer']]) {
     const invite = await f.request(f.owner, base + '/invitations', 'POST', {username: who.user.username, role}, 201);
     await f.request(who, '/invitations/' + invite.id + '/respond', 'POST', {accept: true});

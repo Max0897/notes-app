@@ -57,7 +57,7 @@ async function fixture(t, env = {}, prepare) {
 
 async function setup(t, env) {
   const f = await fixture(t, env);
-  const owner = await f.register('team-owner'), editor = await f.register('team-editor'), viewer = await f.register('team-viewer'), outsider = await f.register('team-outsider');
+  const owner = await f.register('team_owner'), editor = await f.register('team_editor'), viewer = await f.register('team_viewer'), outsider = await f.register('team_outsider');
   const r = (who, path, method = 'GET', body, status = 200) => f.request(path, {cookie: who.cookie, method, body, status}).then(r => r.json);
   const team = (await r(owner, '/teams', 'POST', {name: '协作测试', description: '测试空间'}, 201)).team;
   const base = '/teams/' + team.id;
@@ -132,7 +132,7 @@ test('邀请与所有者保护：指定账号、显式确认、令牌哈希、�
   assert.equal((await r(outsider, '/invitations/link/' + shared.token)).invitation.role, 'editor');
   await r(viewer, '/invitations/' + shared.id + '/respond', 'POST', {accept: true, token: shared.token});
   assert.equal((await r(owner, base + '/members')).members.find(m => m.id === viewer.json.user.id).role, 'viewer');
-  const secondOutsider = await register('team-second-outsider');
+  const secondOutsider = await register('team_second_outsider');
   const outcomes = await Promise.all([outsider, secondOutsider].map(w => r(w, '/invitations/' + shared.id + '/respond', 'POST', {accept: true, token: shared.token})));
   assert.equal(outcomes.filter(v => v.ok).length, 2);
   assert.deepEqual(db.prepare('SELECT status,accepted_by FROM team_invitations WHERE id=?').get(shared.id), {status: 'pending', accepted_by: null});
@@ -155,7 +155,7 @@ test('邀请与所有者保护：指定账号、显式确认、令牌哈希、�
   const logs = await r(owner, base + '/activity'); assert.ok(!JSON.stringify(logs).includes(shared.token));
   assert.equal(db.prepare('SELECT COUNT(*) n FROM spaces WHERE team_id=?').get(team.id).n, 1);
   // 通过另一条邀请加入再退出，也不能使用尚未处理的旧站内邀请重新加入。
-  const late = await register('team-late-member');
+  const late = await register('team_late_member');
   const oldTarget = await r(owner, base + '/invitations', 'POST', {username: late.json.user.username}, 201);
   const another = await r(owner, base + '/invitations', 'POST', {}, 201);
   await r(late, '/invitations/' + another.id + '/respond', 'POST', {accept: true, token: another.token});
@@ -238,7 +238,7 @@ test('活动记录：20 条分页、边界与权限、成员角色中文展示�
   await r(owner, base + '/members/' + editor.json.user.id, 'PATCH', {role: 'viewer'});
   await r(owner, base + '/members/' + editor.json.user.id, 'PATCH', {role: 'editor'});
   const changed = db.prepare("SELECT * FROM activity_logs WHERE team_id=? AND action='调整成员角色' ORDER BY id DESC LIMIT 1").get(team.id);
-  assert.equal(changed.object_name, '小明（@team-editor）：查看者 → 编辑者');
+  assert.equal(changed.object_name, `小明（@${editor.json.user.username}）：查看者 → 编辑者`);
   assert.ok(!changed.object_name.includes(editor.json.user.id));
   const insert = db.prepare('INSERT INTO activity_logs(team_id,actor_id,action,object_name,created_at) VALUES(?,?,?,?,?)');
   const legacy = insert.run(team.id, owner.json.user.id, '调整成员角色', editor.json.user.id + ' → editor', new Date().toISOString()).lastInsertRowid;
@@ -251,7 +251,7 @@ test('活动记录：20 条分页、边界与权限、成员角色中文展示�
   for (let page = 2; page <= Math.ceil(first.total / 20); page++) pages.push(await r(owner, base + '/activity?page=' + page + '&pageSize=20'));
   assert.deepEqual(pages.flatMap(page => page.activities.map(row => row.id)), expected);
   assert.equal(pages.at(-1).next, null);
-  assert.equal(pages.flatMap(page => page.activities).find(row => row.id === legacy).objectName, '小明（@team-editor） → 编辑者');
+  assert.equal(pages.flatMap(page => page.activities).find(row => row.id === legacy).objectName, `小明（@${editor.json.user.username}） → 编辑者`);
   assert.equal(db.prepare('SELECT object_name FROM activity_logs WHERE id=?').get(legacy).object_name, editor.json.user.id + ' → editor', '历史格式只在返回时转换，保留原始审计记录');
   const last = await r(owner, base + '/activity?page=999');
   assert.deepEqual(last.activities, pages.at(-1).activities); assert.equal(last.page, pages.length);

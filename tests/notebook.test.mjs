@@ -32,7 +32,7 @@ async function fixture(t) {
     const data = await response.json(); assert.equal(response.status, expected, path + ': ' + JSON.stringify(data)); return {...data, cookie: response.headers.get('set-cookie')?.split(';')[0]};
   }
   const register = name => request(null, '/auth/register', 'POST', {username: name, password: 'Notebook-test-2026'}, 201);
-  const owner = await register('notes-owner'), editor = await register('notes-editor'), viewer = await register('notes-viewer'), outsider = await register('notes-outsider');
+  const owner = await register('notes_owner'), editor = await register('notes_editor'), viewer = await register('notes_viewer'), outsider = await register('notes_outsider');
   const {team} = await request(owner, '/teams', 'POST', {name: '协作功能测试'}, 201), base = '/teams/' + team.id;
   for (const [who, role] of [[editor, 'editor'], [viewer, 'viewer']]) {
     const invite = await request(owner, base + '/invitations', 'POST', {username: who.user.username, role}, 201);
@@ -54,7 +54,7 @@ class MemoryStorage {
 test('昵称：旧账号回退、校验、实时更新光标与成员信息，用户名登录不变', async t => {
   const f = await fixture(t), {note} = await f.request(f.owner, f.base + '/notes', 'POST', {folderId: null}, 201);
   assert.equal(f.owner.user.nickname, f.owner.user.username);
-  const registered = await f.request(null, '/auth/register', 'POST', {username: 'nickname-registered', nickname: '注册昵称', password: 'Notebook-test-2026'}, 201);
+  const registered = await f.request(null, '/auth/register', 'POST', {username: 'nickname_registered', nickname: '注册昵称', password: 'Notebook-test-2026'}, 201);
   assert.equal(registered.user.nickname, '注册昵称');
   const a = f.connect(f.owner, note.id), b = f.connect(f.editor, note.id); await until(() => a.state.synced && b.state.synced && a.state.members.length === 2, '在线成员');
   for (const nickname of ['', ' '.repeat(2), 'a'.repeat(33), 'bad\u0000name', 123]) await f.request(f.editor, '/auth/profile', 'PATCH', {nickname}, 400);

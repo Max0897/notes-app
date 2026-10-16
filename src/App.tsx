@@ -9,6 +9,7 @@ import {WorkspacePage} from './WorkspacePage';
 import {downloadFiles} from './dataTransfer';
 import {dateMatches, snippet, type DateFilter} from './noteSearch';
 import {Highlight} from './Highlight';
+import {isValidNewUsername, USERNAME_PATTERN, USERNAME_RULE} from '../server/username';
 
 const {Text, Title, Paragraph} = Typography;
 const AccountPage = lazy(() => import('./AccountPage').then(module => ({default: module.AccountPage})));
@@ -137,7 +138,9 @@ export function App() {
   }, [userId, teamId]);
 
   async function auth(event: FormEvent) {
-    event.preventDefault(); setAuthBusy(true);
+    event.preventDefault();
+    if (authMode && !isValidNewUsername(username)) { Message.warning(USERNAME_RULE); return; }
+    setAuthBusy(true);
     try { const data = await api('/auth/' + (authMode ? 'register' : 'login'), 'POST', {username, password, ...(authMode && nickname.trim() ? {nickname} : {})}); setLoading(true); setUser(data.user); setPassword(''); }
     catch (error) { Message.error((error as Error).message); }
     finally { setAuthBusy(false); }
@@ -399,7 +402,10 @@ export function App() {
     <Paragraph type="secondary">{authMode ? '创建你的账号，让每个想法都有归处。' : '登录后，继续上次的灵感。'}</Paragraph>
     <form className="auth-form" onSubmit={auth}>
       <label htmlFor="auth-username"><Text type="secondary">用户名</Text></label>
-      <Input id="auth-username" autoComplete="username" value={username} onChange={setUsername} placeholder="3–32 个字符" maxLength={32}/>
+      <Input id="auth-username" autoComplete="username" autoCapitalize="none" autoCorrect="off" spellCheck={false} required
+        value={username} onChange={setUsername} placeholder={authMode ? '例如 notes_2026' : '请输入用户名'} maxLength={32}
+        pattern={authMode ? USERNAME_PATTERN : undefined} aria-describedby={authMode ? 'auth-username-rule' : undefined}/>
+      {authMode && <Text id="auth-username-rule" type="secondary">{USERNAME_RULE}</Text>}
       {authMode && <Input aria-label="注册昵称" autoComplete="nickname" value={nickname} onChange={setNickname} placeholder="昵称（选填，默认使用用户名）" maxLength={64}/>}
       <label htmlFor="auth-password"><Text type="secondary">密码</Text></label>
       <Input.Password id="auth-password" autoComplete={authMode ? 'new-password' : 'current-password'} value={password} onChange={setPassword} placeholder="至少 8 个字符" maxLength={128}/>
