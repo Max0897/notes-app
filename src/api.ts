@@ -1,9 +1,11 @@
+import {EDITOR_CAPABILITY} from '../server/editorVersion.js';
+
 export type Note = { id: string; title: string; content: any; plainText: string; folderId: string | null; pinned: boolean; deletedAt: string | null; version: number; createdAt: string; updatedAt: string; canEdit?: boolean; canManage?: boolean; modifiedBy?: string };
 export type Folder = { id: string; name: string; canEdit?: boolean; restricted?: boolean; deletedAt?: string | null };
 export type AvatarStyle = 'cutouts';
 export type User = { id: string; username: string; nickname: string; avatarStyle: AvatarStyle; avatarSeed: string };
 export const displayName = (user: {username: string; nickname?: string}) => user.nickname || user.username;
-export type EditorBridge = { flush: () => Promise<boolean>; snapshot: () => Note; hasChanges: () => boolean; draft: () => string };
+export type EditorBridge = { flush: () => Promise<boolean>; snapshot: () => Note; hasChanges: () => boolean; draft: () => string; command?: (action: 'find' | 'outline' | 'focus') => void };
 export type TeamRole = 'owner' | 'admin' | 'editor' | 'viewer';
 export type Team = {id: string; name: string; description: string; icon: string; role: TeamRole; ownerId: string; createdAt: string; deletedAt: string | null; revision: number};
 export type AppNotification = {id: number; kind: string; title: string; message: string; teamId: string | null; teamName: string | null; noteId: string | null; createdAt: string; readAt: string | null; canOpen: boolean; canRespond: boolean};
@@ -17,7 +19,7 @@ export class ApiError extends Error {
 export async function api(path: string, method = 'GET', body?: any) {
   const response = await fetch('/api' + path, {
     method, credentials: 'same-origin',
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    headers: body ? { 'Content-Type': 'application/json', 'X-Notes-Editor': EDITOR_CAPABILITY } : undefined,
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await response.json();

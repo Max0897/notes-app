@@ -270,3 +270,30 @@ ul[data-type="taskList"] input[type="checkbox"]{accent-color:var(--primary-6)}
 @media(max-width:360px){.editor-folder-name{max-width:40px}.search-filters>.arco-typography{display:none}}
 @media(max-width:900px){.workspace-page{grid-column:1}.workspace-header{padding:16px 14px}.workspace-scroll{padding:8px 14px 24px}}
 @media(max-width:480px){.workspace-header h5{font-size:18px}.notification-item{padding:16px 0}}
+
+/* Editor tools stay local to the current document; no UI state enters the shared content. */
+.editor-bubble{position:fixed;z-index:1000;display:flex;align-items:center;gap:2px;padding:4px;border:1px solid var(--color-border-2);border-radius:2px;background:var(--color-bg-popup);box-shadow:0 4px 16px #00000014;max-width:calc(100vw - 24px)}
+.editor-link-form{display:flex;align-items:center;gap:6px;width:340px;max-width:calc(100vw - 48px)}.editor-link-form>.arco-input-wrapper{flex:1;min-width:0}.editor-link-form>.arco-btn{flex:none}
+.editor-slash-menu{position:fixed;z-index:1001;width:260px;max-width:calc(100vw - 24px);max-height:min(320px,calc(100dvh - 24px));overflow:auto;padding:4px;border:1px solid var(--color-border-2);border-radius:2px;background:var(--color-bg-popup);box-shadow:0 4px 20px #00000014;color:var(--color-text-1)}
+.editor-slash-caption,.editor-slash-empty{padding:8px 10px;color:var(--color-text-3);font-size:12px;line-height:20px}
+.editor-slash-menu>button{display:flex;align-items:center;gap:10px;padding:8px 10px;min-height:36px;width:100%;border:0;border-radius:2px;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.editor-slash-menu>button:hover,.editor-slash-menu>button[aria-selected=true]{background:var(--color-fill-2)}.editor-slash-menu>button>svg{flex:none}
+.editor-find-panel{position:absolute;z-index:5;top:var(--editor-tools-bottom,96px);right:12px;width:420px;max-width:calc(100% - 24px);padding:10px;border:1px solid var(--color-border-2);border-radius:2px;background:var(--color-bg-popup);box-shadow:0 4px 16px #00000012}
+.editor-find-row{display:flex;align-items:center;gap:4px;min-width:0}.editor-find-row>svg,.editor-find-row>.arco-btn{flex:none}.editor-find-row>svg{margin:0 4px;color:var(--color-text-3)}
+.editor-find-row>input{flex:1;min-width:0;width:0;padding:5px 6px;border:1px solid var(--color-border-2);border-radius:2px;background:var(--color-bg-2);color:var(--color-text-1);font:inherit;outline:none}.editor-find-row>input:focus{border-color:rgb(var(--primary-6))}
+.editor-find-count{flex:none;min-width:38px;text-align:center;font-size:12px;color:var(--color-text-3);font-variant-numeric:tabular-nums}
+.editor-find-options{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px}.editor-find-options .arco-checkbox-text{font-size:12px}.editor-find-row+.editor-find-row,.editor-find-options+form{margin-top:8px}
+.ProseMirror .editor-find-match{background:rgb(var(--yellow-2));color:inherit}.ProseMirror .editor-find-match.is-current{background:rgb(var(--orange-3));outline:1px solid rgb(var(--orange-6))}
+.editor-outline{position:absolute;z-index:3;top:var(--editor-tools-bottom,96px);bottom:40px;right:12px;width:220px;max-width:calc(100% - 24px);display:flex;flex-direction:column;border:1px solid var(--color-border-2);border-radius:2px;background:var(--color-bg-popup);color:var(--color-text-1)}
+.editor-outline-head{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--color-border-2);font-size:13px}.editor-outline>nav{overflow:auto;padding:6px 0;min-height:0}
+.editor-outline nav>button{display:block;width:100%;padding:7px 12px;border:0;background:transparent;font:inherit;font-size:13px;color:var(--color-text-2);text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}.editor-outline nav>button:hover{background:var(--color-fill-1);color:rgb(var(--primary-6))}.editor-outline nav>.arco-empty{padding:28px 12px}
+.document .ProseMirror :is(h1,h2,h3,h4,h5,h6){scroll-margin-top:24px}
+.app-shell.editor-focus-mode{grid-template-columns:minmax(0,1fr)}.editor-focus-mode>.sidebar,.editor-focus-mode>.note-list{display:none}.editor-focus-mode>.editor-pane{grid-column:1/-1}
+.editor-exit-focus.arco-btn{position:absolute;z-index:3;right:20px;bottom:44px;box-shadow:0 2px 10px #0000000a}
+.ProseMirror .tableWrapper{overflow-x:auto;margin:16px 0;max-width:100%}.ProseMirror table{border-collapse:collapse;table-layout:fixed;width:100%;margin:16px 0;overflow:hidden}.ProseMirror .tableWrapper table{margin:0}
+.ProseMirror :is(td,th){position:relative;box-sizing:border-box;min-width:64px;border:1px solid var(--color-border-3);padding:8px 10px;vertical-align:top}.ProseMirror th{font-weight:600;background:var(--color-fill-1);text-align:left}.ProseMirror :is(td,th)>p{margin:0;min-height:1.7em}.ProseMirror :is(td,th)>*+*{margin-top:8px}
+.ProseMirror .selectedCell:after{content:"";position:absolute;inset:0;z-index:1;background:rgba(var(--primary-6),.12);pointer-events:none}.ProseMirror .column-resize-handle{position:absolute;right:-2px;top:0;bottom:0;width:4px;background:rgb(var(--primary-6));pointer-events:none}.ProseMirror.resize-cursor{cursor:col-resize}.ProseMirror[contenteditable=false] .column-resize-handle{display:none}
+.ProseMirror mark{padding:0 2px;background:rgb(var(--yellow-2));color:inherit}
+@media(min-width:1200px){.editor-pane.has-editor-outline>.document-scroll{padding-right:240px}}
+@media(max-width:900px){.editor-outline{max-height:55dvh;bottom:auto}.editor-exit-focus.arco-btn{right:12px;bottom:42px}.editor-find-panel{right:8px;max-width:calc(100% - 16px)}.ProseMirror :is(td,th){padding:6px 8px}.editor-bubble>.arco-btn{min-width:32px;height:32px}}
+@media(max-width:360px){.editor-find-panel{padding:8px}.editor-find-row{gap:2px}.editor-find-row>.arco-btn{padding:0 5px}.editor-find-count{min-width:32px}}

@@ -27,8 +27,8 @@ async function fixture(t) {
   t.after(async () => { clients.forEach(client => client.destroy()); if (child.exitCode === null) { const exited = once(child, 'exit'); child.kill(); await exited; } await rm(dataDir, {recursive: true, force: true}); });
   await until(() => output.match(/监听 127\.0\.0\.1:(\d+)/), '启动服务').catch(error => { throw new Error(error.message + ': ' + output); });
   const origin = 'http://127.0.0.1:' + output.match(/监听 127\.0\.0\.1:(\d+)/)[1];
-  async function request(who, path, method = 'GET', body, expected = 200) {
-    const response = await fetch(origin + '/api' + path, {method, headers: {'Content-Type': 'application/json', Origin: origin, ...(who ? {Cookie: who.cookie} : {})}, body: body === undefined ? undefined : JSON.stringify(body)});
+  async function request(who, path, method = 'GET', body, expected = 200, headers = {}) {
+    const response = await fetch(origin + '/api' + path, {method, headers: {'Content-Type': 'application/json', 'X-Notes-Editor': 'notes-editor-v3', Origin: origin, ...(who ? {Cookie: who.cookie} : {}), ...headers}, body: body === undefined ? undefined : JSON.stringify(body)});
     const data = await response.json(); assert.equal(response.status, expected, path + ': ' + JSON.stringify(data)); return {...data, cookie: response.headers.get('set-cookie')?.split(';')[0]};
   }
   const register = name => request(null, '/auth/register', 'POST', {username: name, password: 'Notebook-test-2026'}, 201);
@@ -240,6 +240,51 @@ test('草稿：刷新后恢复 Yjs 并合并远端改动，保存回执清理草
   one.write({title: '第一份', content: doc('第一份')}); two.read(); one.write({title: '新修改', content: doc('新修改')}); two.clear();
   assert.equal(one.read()[0].title, '新修改');
   const blocked = new DraftStore('a', null, 'blocked', {setItem() { throw new Error('quota'); }}, 'one'); assert.equal(blocked.write({content: doc('不丢失内存')}), false);
+});
+
+test('表格与高亮：个人保存、MD 往返、历史恢复、团队列宽同步及非法表格拒绝', async t => {
+  const f = await fixture(t);
+  const text = '# 表格记录\n\n| 项目 | 内容 |\n| --- | --- |\n| A\\|B | ==重点==<br>第二行 |';
+  const {notes} = await f.request(f.owner, '/notes/import', 'POST', {folderId:null, files:[{name:'表格.md',text}]}, 201);
+  const note = notes[0], content = structuredClone(note.content);
+  assert.equal(content.content[0].type, 'table');
+  const oldClient = await f.request(f.owner, '/notes/' + note.id, 'PATCH', {version:note.version,content:doc('旧页面丢失的表格')}, 409, {'X-Notes-Editor': ''});
+  assert.match(oldClient.error, /刷新/);
+  assert.deepEqual((await f.request(f.owner, '/notes/' + note.id)).note.content, note.content);
+  content.content[0].content[0].content[0].attrs.colwidth = [180];
+  let saved = (await f.request(f.owner, '/notes/' + note.id, 'PATCH', {version:note.version,title:'调整列宽',content,plainText:note.plainText})).note;
+  assert.deepEqual(saved.content, content);
+  const exported = await f.request(f.owner, '/notes/export', 'POST', {ids:[note.id],format:'markdown'});
+  assert(exported.files[0].text.includes('==重点==')); assert(exported.files[0].text.includes('A\\|B'));
+  const roundtrip = await f.request(f.owner, '/notes/import', 'POST', {folderId:null,files:[{name:'还原.md',text:exported.files[0].text}]}, 201);
+  assert.equal(roundtrip.notes[0].plainText, note.plainText);
+  const history = await f.request(f.owner, '/notes/' + note.id + '/history');
+  const version = history.versions[0]; assert(version);
+  const snapshot = await f.request(f.owner, '/notes/' + note.id + '/history/' + version.id);
+  assert.equal(snapshot.snapshot.content.content[0].type, 'table');
+  const restored = await f.request(f.owner, '/notes/' + note.id + '/history/' + version.id + '/restore', 'POST', {version:saved.version});
+  saved = restored.note; assert(JSON.stringify(saved.content).includes('highlight'));
+  const badTables = [
+    {type:'table',content:[]},
+    {type:'table',content:[{type:'tableRow',content:[]}]},
+    {type:'table',content:[{type:'tableRow',content:[{type:'tableCell',attrs:{rowspan:2,colspan:1,colwidth:null},content:[{type:'paragraph'}]}]}]},
+    {type:'table',content:[{type:'tableRow',content:[{type:'tableCell',attrs:{rowspan:1,colspan:1,colwidth:[80,90]},content:[{type:'paragraph'}]}]}]},
+    {type:'table',content:[{type:'tableRow',content:[{type:'tableCell',content:[{type:'paragraph'}]}]},{type:'tableRow',content:[{type:'tableCell',attrs:{colspan:2,rowspan:1,colwidth:null},content:[{type:'paragraph'}]}]}]},
+  ];
+  for (const table of badTables) await f.request(f.owner, '/notes/' + note.id, 'PATCH', {version:saved.version,content:{type:'doc',content:[table]}}, 400);
+  assert.deepEqual((await f.request(f.owner, '/notes/' + note.id)).note.content, saved.content);
+  const teamImport = await f.request(f.owner, f.base + '/notes/import', 'POST', {folderId:null,files:[{name:'协作表格.md',text}]}, 201);
+  const teamNote = teamImport.notes[0];
+  await f.request(f.owner, f.base + '/notes/' + teamNote.id, 'PATCH', {version:teamNote.version,content:doc('旧页面丢失的表格')}, 409, {'X-Notes-Editor': ''});
+  const a = f.connect(f.owner, teamNote.id), b = f.connect(f.editor, teamNote.id);
+  await until(() => a.state.synced && b.state.synced, '表格同步');
+  const cell = a.document.getXmlFragment('default').get(0).get(0).get(0);
+  cell.setAttribute('colwidth', [220]); assert.equal(await a.flush(), true);
+  await until(() => b.document.getXmlFragment('default').get(0).get(0).get(0).getAttribute('colwidth')?.[0] === 220, '团队列宽广播');
+  const remote = (await f.request(f.owner, f.base + '/notes/' + teamNote.id)).note;
+  assert.equal(remote.content.content[0].content[0].content[0].attrs.colwidth[0], 220);
+  assert(JSON.stringify(remote.content).includes('highlight'));
+  await f.request(f.viewer, f.base + '/notes/' + teamNote.id, 'PATCH', {version:remote.version,content:remote.content}, 403);
 });
 
 test('搜索日期边界、正文匹配摘要和中文批量 ZIP 内容', () => {

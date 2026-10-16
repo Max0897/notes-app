@@ -50,9 +50,10 @@ async function fixture(t) {
   }
   let {note} = await request(owner, base + '/notes', 'POST', {folderId: null}, 201);
   ({note} = await request(owner, base + '/notes/' + note.id, 'PATCH', {version: note.version, title: '协作标题', content: {type: 'doc', content: [{type: 'paragraph', content: [{type: 'text', text: '原始内容'}]}]}, plainText: '原始内容'}));
-  function connect(who, roomTeam = team.id, roomNote = note.id) {
+  function connect(who, roomTeam = team.id, roomNote = note.id, token) {
     class Socket extends WebSocket { constructor(url) { super(url, {headers: {Cookie: who.cookie, Origin: origin}}); } }
     const client = new CollaborationSession(roomTeam, roomNote, who.user, origin.replace('http:', 'ws:') + '/api/collaboration', {WebSocketPolyfill: Socket});
+    if (token) client.provider.setConfiguration({token, websocketProvider:client.socket});
     clients.push(client); client.start(); return client;
   }
   const read = () => request(owner, base + '/notes/' + note.id).then(data => data.note);
@@ -146,6 +147,9 @@ test('会话撤销及删除恢复：旧连接即时失效，恢复保留协作�
 
 test('协作权限：只读写入、实时降级与移除、文件夹限制、无效内容及握手鉴权', {timeout: 45000}, async t => {
   const f = await fixture(t), a = f.connect(f.owner), b = f.connect(f.editor), v = f.connect(f.viewer);
+  const legacy = f.connect(f.owner, f.team.id, f.note.id, 'notes-images-v2');
+  await until(() => legacy.state.error, '旧编辑器被拒绝以保护表格与高亮');
+  assert.match(legacy.state.error, /刷新/);
   await until(() => [a, b, v].every(c => c.state.synced), '同步');
   const outsider = f.connect(f.outsider);
   await until(() => outsider.state.error, '拒绝团队外账号');

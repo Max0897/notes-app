@@ -9,9 +9,15 @@ import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
 import Link from '@tiptap/extension-link';
 import Image from '@tiptap/extension-image';
+import Table from '@tiptap/extension-table';
+import TableRow from '@tiptap/extension-table-row';
+import TableHeader from '@tiptap/extension-table-header';
+import TableCell from '@tiptap/extension-table-cell';
+import Highlight from '@tiptap/extension-highlight';
 import {prosemirrorJSONToYDoc, prosemirrorJSONToYXmlFragment, yDocToProsemirrorJSON} from 'y-prosemirror';
 import * as decoding from 'lib0/decoding';
 import type Database from 'better-sqlite3';
+import {EDITOR_CAPABILITY} from './editorVersion.js';
 
 type User = {id: string; username: string; nickname: string; avatarStyle: 'cutouts'; avatarSeed: string};
 type Identity = {user: User; sessionHash: string; clientId?: number; color?: string; count?: number; until?: number};
@@ -22,7 +28,7 @@ const colors = ['#2563eb', '#dc2626', '#059669', '#9333ea', '#d97706', '#0891b2'
 // 与浏览器编辑器使用同一套节点；链接不引入不被 API 接受的 class 属性。
 const schema = getSchema([StarterKit.configure({history: false}), TaskList, TaskItem.configure({nested: true}), Link.extend({
   addAttributes() { const {class: _class, ...attrs} = (this.parent?.() ?? {}) as Record<string, any>; return attrs; },
-}), Image.extend({addAttributes() { return {...this.parent?.(), imageId: {default: null}, width: {default: null}}; }})]);
+}), Image.extend({addAttributes() { return {...this.parent?.(), imageId: {default: null}, width: {default: null}}; }}), Table, TableRow, TableHeader, TableCell, Highlight]);
 const stamp = (doc: Y.Doc) => Buffer.from(Y.encodeSnapshot(Y.snapshot(doc))).toString('base64');
 
 export function createRealtime(db: Database.Database, options: {
@@ -164,9 +170,9 @@ export function createRealtime(db: Database.Database, options: {
     quiet: true, timeout: 30000, debounce: 1000, maxDebounce: 3000,
     maxPendingDocuments: 1, maxUnauthenticatedQueueSize: 1024 * 1024, maxUnauthenticatedQueueMessages: 100,
     async onAuthenticate({documentName, requestHeaders, connectionConfig, token}) {
-      // Older editors can strip image nodes or their persisted display width.
+      // Older editors can strip tables, highlights or persisted image sizes.
       // This is a schema capability marker; authentication still uses cookies.
-      if (token !== 'notes-images-v2') denied('编辑器已更新，请刷新页面后重新打开');
+      if (token !== EDITOR_CAPABILITY) denied('编辑器已更新，请刷新页面后重新打开');
       const identity = session(requestHeaders.get('cookie'));
       const permission = access(documentName, identity);
       connectionConfig.readOnly = !permission.canEdit;

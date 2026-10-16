@@ -16,6 +16,8 @@ import {useHintTitle} from './hints';
 import {UserAvatar} from './UserAvatar';
 import {CollaborationSession, type CollaborationState} from './collaboration';
 import type {EditorBridge, Note, User} from './api';
+import {documentExtensions, interactionExtensions} from './editorExtensions';
+import {editorAction} from './editorSearch';
 
 const {Text} = Typography;
 type Props = {note: Note; onSave: (note: Note) => void; user: User; teamId: string; readOnly?: boolean; onComment?: () => void};
@@ -27,6 +29,7 @@ export const TeamNoteEditor = forwardRef<EditorBridge, Props>(function TeamNoteE
   useImperativeHandle(bridge, () => ({
     flush: () => inner.current?.flush() ?? Promise.resolve(!session?.hasChanges()), snapshot: () => inner.current?.snapshot() ?? props.note,
     hasChanges: () => inner.current?.hasChanges() ?? session?.hasChanges() ?? false, draft: () => inner.current?.draft() ?? '',
+    command: action => inner.current?.command?.(action),
   }), [session, props.note]);
   useEffect(() => {
     const url = new URL('/api/collaboration', location.href); url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -55,7 +58,7 @@ const CollaborativeEditor = forwardRef<EditorBridge, Props & {session: Collabora
   const editable = !readOnly && state.canEdit && !state.error;
   function editing() { session.setEditing(true); clearTimeout(idle.current); idle.current = setTimeout(() => session.setEditing(false), 3000); }
   const editor = useEditor({
-    extensions: [StarterKit.configure({history: false}), TaskList, TaskItem.configure({nested: true}), EditorLink, EditorImage,
+    extensions: [StarterKit.configure({history: false}), TaskList, TaskItem.configure({nested: true}), EditorLink, EditorImage, ...documentExtensions(), ...interactionExtensions(),
       ImageUploads.configure({path: '/api/teams/' + teamId + '/notes/' + note.id + '/images'}),
       Collaboration.configure({document: session.document}),
       CollaborationCursor.configure({provider: session.provider, user: state.me,
@@ -113,7 +116,7 @@ const CollaborativeEditor = forwardRef<EditorBridge, Props & {session: Collabora
     if (!ok) Message.warning(state.error || '尚有内容未保存，请等待连接恢复后重试');
     return ok;
   }
-  useImperativeHandle(bridge, () => ({flush, snapshot: () => latest.current, hasChanges: () => session.hasChanges() || hasImageUploads(editor), draft: () => titleText.toString() + '\n\n' + (editor?.getText() ?? '')}));
+  useImperativeHandle(bridge, () => ({flush, snapshot: () => latest.current, hasChanges: () => session.hasChanges() || hasImageUploads(editor), draft: () => titleText.toString() + '\n\n' + (editor?.getText() ?? ''), command: action => editorAction(editor, action)}));
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => { if (session.hasChanges() || hasImageUploads(editor)) { event.preventDefault(); event.returnValue = ''; } };
     window.addEventListener('beforeunload', warn);
@@ -141,7 +144,7 @@ const CollaborativeEditor = forwardRef<EditorBridge, Props & {session: Collabora
   const members = [...state.members.filter(member => member.id === state.me.id), ...otherMembers];
   return <>
     {(state.recovered || state.draftError) && <div className="recovery-banner"><Text type={state.draftError ? 'warning' : 'secondary'}>{state.draftError ? '此设备暂时无法保存恢复草稿，请在服务器显示已保存后再关闭页面。' : state.saved ? '本地草稿已恢复并同步' : '已恢复本地草稿，正在合并同步…'}</Text></div>}
-    <div className="format-bar collaboration-format-bar"><EditorTools editor={editor} disabled={!editable}/>
+    <div className="format-bar collaboration-format-bar"><EditorTools editor={editor} disabled={!editable} onComment={onComment}/>
       <div className="editor-save-info">
         <div className="editor-collaboration-info"><Text type="secondary" title={modifiedTitle}>最后修改：{state.note?.modifiedBy ?? note.modifiedBy ?? '团队成员'}</Text></div>
         <div className="collaborator-avatars" aria-label={`当前在线 ${members.length} 人`}>

@@ -17,6 +17,7 @@ import {createRealtime} from './realtime.js';
 import {initNotebook, registerNotebook} from './notebook.js';
 import {initImages, isImageUpload, MAX_IMAGE_BYTES} from './images.js';
 import {isValidNewUsername, USERNAME_RULE} from './username.js';
+import {EDITOR_CAPABILITY, needsCurrentEditor} from './editorVersion.js';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const production = process.env.NODE_ENV === 'production';
@@ -261,6 +262,32 @@ function validateContent(value: unknown): JsonObject {
     if (has(node, 'content')) {
       if (type === 'text' || type === 'hardBreak' || type === 'horizontalRule' || type === 'image' || !Array.isArray(node.content)) invalid('正文子节点格式无效');
       for (const child of node.content) walk(child, depth + 1, type);
+    }
+    if (type === 'table') {
+      const rows = node.content as JsonObject[] | undefined;
+      if (!rows?.length || rows.length > 100) invalid('表格须为 1 至 100 行');
+      const grid: boolean[][] = rows.map(() => []);
+      let width = 0;
+      rows.forEach((row, rowIndex) => {
+        const cells = row.content as JsonObject[] | undefined;
+        if (!cells?.length) invalid('表格行不能为空');
+        let column = 0;
+        for (const cell of cells) {
+          if (!Array.isArray(cell.content) || !cell.content.length) invalid('表格单元格缺少内容节点');
+          while (grid[rowIndex][column]) column++;
+          const attrs = cell.attrs as JsonObject | undefined;
+          const colspan = Number(attrs?.colspan ?? 1), rowspan = Number(attrs?.rowspan ?? 1);
+          if (column + colspan > 100 || rowIndex + rowspan > rows.length) invalid('表格跨度超出行列范围');
+          if (Array.isArray(attrs?.colwidth) && attrs.colwidth.length !== colspan) invalid('表格列宽与跨度不匹配');
+          for (let r = rowIndex; r < rowIndex + rowspan; r++) for (let c = column; c < column + colspan; c++) {
+            if (grid[r][c]) invalid('表格单元格不能重叠');
+            grid[r][c] = true;
+          }
+          column += colspan;
+        }
+        width = Math.max(width, grid[rowIndex].length);
+      });
+      if (!width || grid.some(row => row.length !== width || Array.from({length: width}, (_, index) => row[index]).some(value => !value))) invalid('表格各行列数必须一致');
     }
   };
   walk(value, 0, null);
@@ -747,6 +774,9 @@ app.patch('/api/notes/:id', async (c) => {
   const result = db.transaction(() => {
     const current = ownedNote(id, userId);
     if (current.version !== body.version) return { conflict: true as const, note: noteFromRow(current) };
+    if (has(body, 'content') && c.req.header('X-Notes-Editor') !== EDITOR_CAPABILITY && needsCurrentEditor(JSON.parse(current.content))) {
+      throw new ApiError(409, '编辑器已更新，请刷新页面后重新编辑');
+    }
     if (has(body, 'content')) images.validateReferences(body.content, userId, userId, id);
     if (has(body, 'folderId') && body.folderId !== null) ownedFolder(body.folderId as string, userId);
     const currentValues: Record<string, string | number | null> = {

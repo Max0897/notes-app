@@ -5,11 +5,11 @@ import {Plugin, PluginKey} from '@tiptap/pm/state';
 import {Decoration, DecorationSet} from '@tiptap/pm/view';
 import {find} from 'linkifyjs';
 
-function normalizeLink(value: string): string {
+export function normalizeLink(value: string): string {
   return /^(?:[a-z][\w+.-]*:|[/#])/i.test(value) ? value : 'https://' + value;
 }
 
-function allowedLink(value: string): boolean {
+export function allowedLink(value: string): boolean {
   // eslint-disable-next-line no-control-regex -- 链接地址不能包含控制字符。
   if (!value || value.length > 2048 || /[\s\u0000-\u001f\u007f-\u009f\\]/u.test(value)) return false;
   if (value.startsWith('#')) return true;

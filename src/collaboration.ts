@@ -2,6 +2,7 @@ import {HocuspocusProvider, HocuspocusProviderWebsocket} from '@hocuspocus/provi
 import * as Y from 'yjs';
 import type {Note, User} from './api';
 import {DraftStore, encodeUpdate, decodeUpdate} from './drafts';
+import {EDITOR_CAPABILITY} from '../server/editorVersion.js';
 
 export type Collaborator = User & {name: string; color: string; editing?: boolean};
 export type CollaborationState = {
@@ -37,7 +38,7 @@ export class CollaborationSession {
     this.socket = new HocuspocusProviderWebsocket({url, autoConnect: false, maxDelay: 5000, ...websocketOptions});
     this.provider = new HocuspocusProvider({
       websocketProvider: this.socket, name: `team:${teamId}:note:${noteId}`, document: this.document,
-      token: 'notes-images-v2', flushDelay: 50,
+      token: EDITOR_CAPABILITY, flushDelay: 50,
       onStatus: ({status}) => { this.state.connected = status === 'connected'; this.publish(); },
       onDisconnect: () => { this.state.connected = false; this.publish(); },
       onSynced: ({state}) => {

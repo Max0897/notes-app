@@ -4,6 +4,7 @@ import type {Hono} from 'hono';
 import {streamSSE} from 'hono/streaming';
 import type {AppContext, AppEnv, JsonObject} from './index.js';
 import {invitationLinkTokens} from './invitationLinks.js';
+import {EDITOR_CAPABILITY, needsCurrentEditor} from './editorVersion.js';
 
 const retention = 30 * 86400000;
 type Role = 'owner' | 'admin' | 'editor' | 'viewer';
@@ -454,6 +455,7 @@ export function registerCollaboration(app: Hono<AppEnv>, db: Database.Database, 
       const t = team(c), n = note(c, t, c.req.param('id'), true);
       if (!Number.isSafeInteger(body.version) || Number(body.version) < 1) fail(400, '版本无效');
       if (body.version !== n.version) return {conflict: true, note: noteDto(c, t, n)};
+      if ('content' in body && c.req.header('X-Notes-Editor') !== EDITOR_CAPABILITY && needsCurrentEditor(JSON.parse(n.content))) fail(409, '编辑器已更新，请刷新页面后重新编辑');
       if (['title', 'content', 'plainText'].some(key => key in body) && db.prepare('SELECT 1 FROM collaboration_documents WHERE note_id=?').get(n.id)) fail(409, '此备忘录已启用实时协作，请刷新后通过协作编辑器修改');
       if (folder(t, n.folder_id)?.deleted_at) fail(409, '请先恢复所属文件夹');
       const updates: Row = {};

@@ -147,7 +147,9 @@ test('隔离后端 API：认证、富文本、CRUD、版本冲突、用户隔离
     const page = await fetch(origin + path, {headers: {Accept: 'text/html'}});
     assert.equal(page.status, 200, '独立页面直接刷新：' + path);
     assert.match(page.headers.get('content-type'), /text\/html/);
-    assert.match(await page.text(), /<div id="root"><\/div>/);
+    const html = await page.text();
+    assert.match(html, /<div id="root">/);
+    assert.match(html, /id="app-loading" role="status"/);
   }
   const missingAsset = await fetch(origin + '/assets/nonexistent-routing-test.js', {headers: {Accept: 'text/html'}});
   assert.equal(missingAsset.status, 404, '静态资源不存在时不回退到页面');

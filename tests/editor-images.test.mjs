@@ -124,7 +124,8 @@ try {
   let picker;
   const oldClick = window.HTMLInputElement.prototype.click;
   window.HTMLInputElement.prototype.click = function() {picker = this;};
-  click(document.querySelector('button[aria-label="插入图片"]'));
+  click(document.querySelector('button[aria-label="插入内容"]')); await delay(60);
+  click([...document.querySelectorAll('[role="menuitem"]')].find(item => item.textContent === '图片'));
   window.HTMLInputElement.prototype.click = oldClick;
   assert.equal(picker.accept, 'image/jpeg,image/png,image/webp'); assert(picker.multiple);
   Object.defineProperty(picker, 'files', {value: [file()]}); picker.dispatchEvent(new Event('change'));

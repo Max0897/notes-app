@@ -1,8 +1,11 @@
 import {useState, type KeyboardEvent, type MouseEvent} from 'react';
 import {Dropdown, Menu, Message} from '@arco-design/web-react';
 import {EditorContent, useEditorState, type Editor} from '@tiptap/react';
-import {Bold, Check, ClipboardPaste, Code, Copy, Eraser, Heading2, ImagePlus, Italic, List, ListChecks, ListOrdered, MessageSquare, Minus, Plus, Quote, Redo2, Scissors, SquareDashed, Strikethrough, Type, Undo2} from 'lucide-react';
+import {Bold, Check, ClipboardPaste, Code, Copy, Eraser, Heading2, ImagePlus, Italic, List, ListChecks, ListOrdered, MessageSquare, Minus, Plus, Quote, Redo2, Scissors, SquareDashed, Strikethrough, Type, Undo2, Table2, Highlighter, Search, ListTree, Maximize2} from 'lucide-react';
 import {chooseImages} from './editorImages';
+import {editorAction} from './editorSearch';
+import {tableActions, tableActionDisabled} from './editorTable';
+import {useEditorEditable} from './editorState';
 
 function Label({Icon, text, shortcut, active}: {Icon: typeof Bold; text: string; shortcut?: string; active?: boolean}) {
   return <span className="editor-context-option"><span className="ico-label"><Icon size={16}/><span>{text}</span></span>
@@ -14,7 +17,7 @@ export function EditorContextMenu({editor, disabled = false, onComment}: {editor
   const [open, setOpen] = useState(false);
   const [clipboardBusy, setClipboardBusy] = useState(false);
   useEditorState({editor, selector: ({transactionNumber}) => open ? transactionNumber : 0});
-  const editable = !!editor?.isEditable && !disabled;
+  const editable = useEditorEditable(editor) && !disabled;
   const selected = !!editor && !editor.state.selection.empty;
   const modifier = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl';
 
@@ -75,11 +78,13 @@ export function EditorContextMenu({editor, disabled = false, onComment}: {editor
     {key: 'heading', label: '标题', Icon: Heading2, active: editor.isActive('heading', {level: 2}), run: () => editor.chain().focus().toggleHeading({level: 2}).run()},
     {key: 'bold', label: '粗体', Icon: Bold, shortcut: modifier + ' + B', active: editor.isActive('bold'), run: () => editor.chain().focus().toggleBold().run()},
     {key: 'italic', label: '斜体', Icon: Italic, shortcut: modifier + ' + I', active: editor.isActive('italic'), run: () => editor.chain().focus().toggleItalic().run()},
+    {key: 'highlight', label: '高亮', Icon: Highlighter, active: editor.isActive('highlight'), run: () => editor.chain().focus().toggleHighlight().run()},
     {key: 'strike', label: '删除线', Icon: Strikethrough, active: editor.isActive('strike'), run: () => editor.chain().focus().toggleStrike().run()},
     {key: 'code', label: '行内代码', Icon: Code, active: editor.isActive('code'), run: () => editor.chain().focus().toggleCode().run()},
     {key: 'clear', label: '清除格式', Icon: Eraser, run: () => editor.chain().focus().unsetAllMarks().clearNodes().run()},
   ] : [];
   const inserts = editor ? [
+    {key: 'table', label: '表格', Icon: Table2, run: () => editor.chain().focus().insertTable({rows: 3, cols: 3, withHeaderRow: true}).run()},
     {key: 'image', label: '图片', Icon: ImagePlus, run: () => chooseImages(editor)},
     {key: 'bullet', label: '无序列表', Icon: List, active: editor.isActive('bulletList'), run: () => editor.chain().focus().toggleBulletList().run()},
     {key: 'ordered', label: '有序列表', Icon: ListOrdered, active: editor.isActive('orderedList'), run: () => editor.chain().focus().toggleOrderedList().run()},
@@ -93,7 +98,10 @@ export function EditorContextMenu({editor, disabled = false, onComment}: {editor
     if (key === 'copy' || key === 'cut' || key === 'paste') { void clipboard(key); return; }
     if (key === 'all') { editor.chain().focus().selectAll().run(); return; }
     if (key === 'comment') { onComment?.(); return; }
+    if (key === 'find' || key === 'outline' || key === 'focus') { editorAction(editor, key); return; }
     if (!editable || !editor.isEditable) return;
+    const tableAction = tableActions.find(action => 'table:' + action.key === key);
+    if (tableAction && !tableActionDisabled(editor, tableAction)) { tableAction.run(editor); return; }
     if (key === 'undo') editor.chain().focus().undo().run();
     else if (key === 'redo') editor.chain().focus().redo().run();
     else [...formats, ...inserts].find(action => action.key === key)?.run();
@@ -117,6 +125,12 @@ export function EditorContextMenu({editor, disabled = false, onComment}: {editor
         <Menu.Item key="paste" disabled={!editable || clipboardBusy}><Label Icon={ClipboardPaste} text="粘贴" shortcut={modifier + ' + V'}/></Menu.Item>
         <Menu.Item key="all"><Label Icon={SquareDashed} text="全选" shortcut={modifier + ' + A'}/></Menu.Item>
         {onComment && <Menu.Item key="comment"><Label Icon={MessageSquare} text="评论"/></Menu.Item>}
+        <Menu.Item key="find"><Label Icon={Search} text="查找替换" shortcut={modifier + ' + F'}/></Menu.Item>
+        <Menu.Item key="outline"><Label Icon={ListTree} text="文档大纲"/></Menu.Item>
+        <Menu.Item key="focus"><Label Icon={Maximize2} text="专注模式"/></Menu.Item>
+        {editable && editor.isActive('table') && <Menu.SubMenu key="table-options" title={<Label Icon={Table2} text="表格操作"/>} popup triggerProps={submenuProps}>
+          {tableActions.map(action => <Menu.Item key={'table:' + action.key} disabled={tableActionDisabled(editor, action)}>{action.label}</Menu.Item>)}
+        </Menu.SubMenu>}
         {editable ? <Menu.SubMenu key="format" title={<Label Icon={Type} text="文字格式"/>} popup triggerProps={submenuProps}>
           {formats.map(action => <Menu.Item key={action.key} disabled={!editable}><Label Icon={action.Icon} text={action.label} shortcut={'shortcut' in action ? action.shortcut : undefined} active={'active' in action && action.active}/></Menu.Item>)}
         </Menu.SubMenu> : <Menu.Item key="format" disabled><Label Icon={Type} text="文字格式"/></Menu.Item>}

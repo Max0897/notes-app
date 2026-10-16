@@ -1,7 +1,7 @@
 import {lazy, Suspense, useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent} from 'react';
 import {Outlet, useLocation, useMatches, useNavigate, useParams} from 'react-router-dom';
 import {Badge, Button, Card, Checkbox, Drawer, Dropdown, Empty, Input, List, Menu, Message, Modal, Select, Space, Spin, Tag, Tooltip, Typography} from '@arco-design/web-react';
-import {ArrowLeft, Bell, BookOpen, Check, CheckSquare, Edit3, FileCode2, FileText, Folder as FolderIcon, Mail, Menu as MenuIcon, MoreHorizontal, Pencil, Plus, RotateCcw, Search, Settings, Star, Trash2, History, Link as LinkIcon, MessageSquare, Upload} from 'lucide-react';
+import {ArrowLeft, Bell, BookOpen, Check, CheckSquare, Edit3, FileCode2, FileText, Folder as FolderIcon, Mail, Menu as MenuIcon, MoreHorizontal, Pencil, Plus, RotateCcw, Search, Settings, Star, Trash2, History, Link as LinkIcon, MessageSquare, Upload, ListTree, Maximize2} from 'lucide-react';
 import {api, ApiError, isManager, type AppNotification, type Team, type EditorBridge, type Folder, type Note, type User} from './api';
 import {AccountMenu} from './AccountMenu';
 import {NoteEditor} from './NoteEditor';
@@ -410,7 +410,7 @@ export function App() {
 
   shortcutHandler.current = event => {
     if (!user) return;
-    if (event.key === 'Escape' && document.querySelector('.editor-context-menu, .mention-options')) return;
+    if (event.key === 'Escape' && document.querySelector('.editor-context-menu, .mention-options, .editor-find-panel, .editor-slash-menu, .editor-outline, .editor-bubble, .editor-focus-mode')) return;
     const modifier = (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey;
     const key = event.key.toLowerCase();
     if (modifier && (key === 's' || event.code === 'KeyS')) {
@@ -562,7 +562,8 @@ export function App() {
         <Text className="editor-folder-name" type="secondary">{current.deletedAt ? '最近删除' : folders.find(folder => folder.id === current.folderId)?.name || '未分类'}</Text>
       </Space><Space size={4}>
         {current.deletedAt && <Button size="small" disabled={batchBusy || current.canEdit === false} onClick={() => void mutate({deletedAt: null})}>恢复笔记</Button>}
-        <Dropdown trigger="click" position="br" triggerProps={{autoFitPosition: true}} droplist={<Menu style={{maxHeight: 'min(360px, calc(100dvh - 72px))'}} onClickMenuItem={key => {
+        <Dropdown trigger="click" position="br" triggerProps={{autoFitPosition: true}} droplist={<Menu style={{maxHeight: 'min(520px, calc(100dvh - 72px))'}} onClickMenuItem={key => {
+          if (key === 'find' || key === 'outline' || key === 'focus') { editorRef.current?.command?.(key); return; }
           if (key === 'link') void copyNoteLink(current);
           else if (String(key).startsWith('export-')) void exportNotes([current.id], key === 'export-md' ? 'markdown' : 'text');
           else if (key === 'pin') void mutate({pinned: !current.pinned});
@@ -571,6 +572,9 @@ export function App() {
           else if (key === 'delete') permaDelete();
           else if (key === 'history' || key === 'comments') void safeSwitch(() => setActivity(key));
         }}>
+          <Menu.Item key="find"><Ico Icon={Search} text="查找替换"/></Menu.Item>
+          <Menu.Item key="outline"><Ico Icon={ListTree} text="文档大纲"/></Menu.Item>
+          <Menu.Item key="focus"><Ico Icon={Maximize2} text="专注模式"/></Menu.Item>
           {!current.deletedAt && <Menu.Item key="pin" disabled={current.canEdit === false}><Ico Icon={Star} text={current.pinned ? '取消置顶' : '置顶'}/></Menu.Item>}
           {!current.deletedAt && folderMoveMenu(writableFolders, current.folderId, current.canEdit === false)}
           {!current.deletedAt && <Menu.Item key="history"><Ico Icon={History} text="历史版本"/></Menu.Item>}
