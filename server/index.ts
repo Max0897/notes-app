@@ -15,7 +15,7 @@ import {initCollaboration, registerCollaboration} from './teams.js';
 import {initNotifications, registerNotifications} from './notifications.js';
 import {createRealtime} from './realtime.js';
 import {initNotebook, registerNotebook} from './notebook.js';
-import {initImages, MAX_IMAGE_BYTES} from './images.js';
+import {initImages, isImageUpload, MAX_IMAGE_BYTES} from './images.js';
 import {isValidNewUsername, USERNAME_RULE} from './username.js';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -72,7 +72,7 @@ export type Note = {
 };
 
 class ApiError extends Error {
-  constructor(public readonly status: 400 | 401 | 403 | 404 | 409 | 429, message: string) {
+  constructor(public readonly status: 400 | 401 | 403 | 404 | 409 | 429 | 503, message: string) {
     super(message);
   }
 }
@@ -477,7 +477,6 @@ app.use('/api/*', async (c, next) => {
   // Revoke live sockets before any subsequent broadcasts after an API mutation.
   if (!['GET', 'HEAD', 'OPTIONS'].includes(c.req.method)) realtime.revalidate();
 });
-app.use('/api/*', (c, next) => bodyLimit({maxSize: c.req.method === 'POST' && /^\/api\/(?:teams\/[0-9a-f-]{36}\/)?notes\/[0-9a-f-]{36}\/images$/.test(c.req.path) ? MAX_IMAGE_BYTES + 64 * 1024 : MAX_BODY_BYTES, onError: ctx => ctx.json({error: '请求正文超过大小限制'}, 413)})(c, next));
 const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
   if (!c.get('user')) {
     clearSessionCookie(c);
@@ -485,6 +484,8 @@ const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
   }
   await next();
 };
+app.use('/api/*', (c, next) => isImageUpload(c) ? requireAuth(c, async () => { await images.uploadGuard(c, next); }) : next());
+app.use('/api/*', (c, next) => bodyLimit({maxSize: isImageUpload(c) ? MAX_IMAGE_BYTES + 64 * 1024 : MAX_BODY_BYTES, onError: ctx => ctx.json({error: '请求正文超过大小限制'}, 413)})(c, next));
 
 // 健康检查：容器编排用它判断实例是否存活，不要求登录。
 app.get('/api/health', (c) => c.json({ ok: true, uptime: Math.round(process.uptime()) }));

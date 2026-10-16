@@ -173,6 +173,7 @@ export const ImageUploads = Extension.create<{path: string}, UploadStorage>({
           let finished = false;
           const complete = (error?: string) => {
             if (finished) return; finished = true; state.active--;
+            window.dispatchEvent(new Event('storage:refresh'));
             if (state.jobs.has(job.id) && !state.destroyed) {
               if (error) { job.status = 'failed'; job.label.textContent = error; job.retry.hidden = false; }
               else remove(job);

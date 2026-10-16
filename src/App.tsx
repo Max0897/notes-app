@@ -9,6 +9,8 @@ import {WorkspacePage} from './WorkspacePage';
 import {downloadFiles} from './dataTransfer';
 import {dateMatches, snippet, type DateFilter} from './noteSearch';
 import {Highlight} from './Highlight';
+import {SidebarStorage} from './StorageUsage';
+import {useStorageUsage} from './storage';
 import {isValidNewUsername, USERNAME_PATTERN, USERNAME_RULE} from '../server/username';
 
 const {Text, Title, Paragraph} = Typography;
@@ -65,6 +67,7 @@ export function App() {
   const shortcutHandler = useRef<(event: KeyboardEvent) => void>();
   const current = notes.find(note => note.id === selected);
   const userId = user?.id;
+  const storage = useStorageUsage(userId, teamId);
 
   const workspaceApi = (path: string, method = 'GET', body?: any) => api((teamId ? '/teams/' + teamId : '') + path, method, body);
   async function loadSpaces() { const data = await api('/spaces'); setTeams(data.teams); return data.teams as Team[]; }
@@ -432,6 +435,7 @@ export function App() {
       {currentTeam && <Button className="sidebar-action" type="text" long disabled={batchBusy} aria-current={view === 'settings' ? 'page' : undefined} onClick={() => openPage('settings')}><Settings size={17}/><span>团队设置</span></Button>}
       <Button className="sidebar-action" type="text" long disabled={batchBusy} aria-current={view === 'invitations' ? 'page' : undefined} onClick={() => openPage('invitations')}><Mail size={17}/><span>团队邀请</span></Button>
       <Button className="sidebar-action" type="text" long disabled={batchBusy} aria-current={view === 'notifications' ? 'page' : undefined} onClick={() => openPage('notifications')}><Bell size={17}/><span>通知中心</span><Badge count={unreadCount} maxCount={99}/></Button>
+      <SidebarStorage data={storage.data} error={storage.error} team={!!teamId} disabled={batchBusy} onClick={() => openPage(teamId ? 'settings' : 'account')}/>
       <AccountMenu user={user} disabled={batchBusy} onSettings={() => openPage('account')} onLogout={() => void logout()}/>
     </div>
   </>;

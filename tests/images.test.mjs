@@ -23,13 +23,13 @@ class ApiError extends Error { constructor(status, message) { super(message); th
 async function until(check, label) {
   const start = Date.now(); while (!await check()) { if (Date.now() - start > 10000) throw new Error('等待超时：' + label); await new Promise(resolve => setTimeout(resolve, 20)); }
 }
-async function fixture(t) {
+async function fixture(t, env = {}) {
   const dataDir = await mkdtemp(resolve(tmpdir(), 'notes-images-')), clients = []; let child, origin, db, output = '';
   async function stop() { if (child && child.exitCode === null && child.signalCode === null) { const done = once(child, 'exit'); child.kill(); await done; } }
   async function start() {
     output = '';
     child = spawn(process.execPath, ['--import', 'tsx', 'server/index.ts'], {cwd: fileURLToPath(new URL('../', import.meta.url)), stdio: ['ignore', 'pipe', 'pipe'],
-      env: {...process.env, HOST: '127.0.0.1', PORT: '0', DATA_DIR: dataDir, NODE_ENV: 'test', SECURE_COOKIES: 'false', PUBLIC_ORIGIN: '', TRUSTED_PROXY_IPS: ''}});
+      env: {...process.env, HOST: '127.0.0.1', PORT: '0', DATA_DIR: dataDir, NODE_ENV: 'test', SECURE_COOKIES: 'false', PUBLIC_ORIGIN: '', TRUSTED_PROXY_IPS: '', ...env}});
     child.stdout.on('data', chunk => { output += chunk; }); child.stderr.on('data', chunk => { output += chunk; });
     await until(() => /监听 127\.0\.0\.1:\d+/.test(output), '启动服务').catch(error => { throw new Error(error.message + output); });
     origin = 'http://127.0.0.1:' + /监听 127\.0\.0\.1:(\d+)/.exec(output)[1];
@@ -99,6 +99,90 @@ test('图片上传：真实解码、10 MB / 像素限制、同源和账号隔离
   await f.stop(); await f.start();
   assert.equal((await f.request(f.owner, path)).note.content.content[0].attrs.width, 360, '重启保留显示尺寸');
   assert.equal((await f.raw(f.owner, '/images/' + image.id)).status, 200); assert.ok(existsSync(f.file(image.id)));
+});
+
+test('图片容量：空间与每日用量隔离、团队只读成员可查看汇总、历史共享引用不重复计费', {timeout: 60000}, async t => {
+  const f = await fixture(t), {note} = await f.request(f.owner, '/notes', 'POST', {folderId: null}, 201), path = '/notes/' + note.id;
+  assert.equal((await f.raw(null, '/storage')).status, 401);
+  const initial = (await f.request(f.owner, '/storage')).storage;
+  assert.equal(initial.usedBytes, 0); assert.equal(initial.limitBytes, 200 * 1024 ** 2); assert.equal(initial.today.limitBytes, 100 * 1024 ** 2);
+  const image = await f.upload(f.owner, path, f.png); await f.save(f.owner, path, doc([imageNode(image)]));
+  const copy = (await f.request(f.owner, '/notes', 'POST', {folderId: null}, 201)).note;
+  await f.save(f.owner, '/notes/' + copy.id, doc([imageNode(image)]));
+  await f.save(f.owner, path, doc([text('历史保留图片')]));
+  const personal = (await f.request(f.owner, '/storage')).storage;
+  assert.equal(personal.imageCount, 1); assert.equal(personal.usedBytes, f.db.prepare('SELECT size FROM images WHERE id=?').get(image.id).size);
+  assert.equal(personal.today.usedBytes, f.png.length); assert.equal(personal.today.userUsedBytes, f.png.length);
+  assert.equal((await f.request(f.outsider, '/storage')).storage.usedBytes, 0);
+  const {team} = await f.request(f.owner, '/teams', 'POST', {name: '容量共享'}, 201), base = '/teams/' + team.id;
+  assert.equal((await f.raw(f.outsider, base + '/storage')).status, 404);
+  const invite = await f.request(f.owner, base + '/invitations', 'POST', {username: f.outsider.user.username, role: 'viewer'}, 201);
+  await f.request(f.outsider, '/invitations/' + invite.id + '/respond', 'POST', {accept: true});
+  const shared = (await f.request(f.owner, base + '/notes', 'POST', {folderId: null}, 201)).note;
+  await f.upload(f.owner, base + '/notes/' + shared.id, f.png);
+  const teamUsage = (await f.request(f.outsider, base + '/storage')).storage;
+  assert.equal(teamUsage.kind, 'team'); assert.equal(teamUsage.limitBytes, 1024 ** 3); assert.equal(teamUsage.today.limitBytes, 500 * 1024 ** 2);
+  assert.equal(teamUsage.imageCount, 1); assert.equal(teamUsage.today.usedBytes, f.png.length); assert.equal(teamUsage.today.userUsedBytes, 0);
+  assert.equal((await f.request(f.owner, '/storage')).storage.today.userUsedBytes, 2 * f.png.length);
+  assert.equal((await f.request(f.owner, '/storage')).storage.imageCount, 1);
+  await f.request(f.owner, base + '/members/' + f.outsider.user.id, 'DELETE');
+  assert.equal((await f.raw(f.outsider, base + '/storage')).status, 404);
+});
+
+test('上传配额：实际大小强制限制、失败预留释放，删除和重启不返还每日额度', {timeout: 60000}, async t => {
+  const f = await fixture(t, {IMAGE_PERSONAL_LIMIT_MB: '1', IMAGE_MIN_FREE_DISK_MB: '0'});
+  const {note} = await f.request(f.owner, '/notes', 'POST', {folderId: null}, 201), path = '/notes/' + note.id;
+  const large = await sharp(randomBytes(512 * 512 * 3), {raw: {width: 512, height: 512, channels: 3}}).png().toBuffer();
+  await f.upload(f.owner, path, large);
+  const used = (await f.request(f.owner, '/storage')).storage;
+  assert.ok(used.usedBytes > 700000 && used.usedBytes < 1024 ** 2);
+  await f.upload(f.owner, path, large, 409);
+  assert.equal(f.db.prepare('SELECT COUNT(*) n FROM images').get().n, 1);
+  assert.equal((await f.request(f.owner, '/storage')).storage.today.usedBytes, 2 * large.length, '已接收但容量不足的上传仍消耗当天流量');
+  await f.upload(f.owner, path, f.png);
+  const daily = (await f.request(f.owner, '/storage')).storage.today.usedBytes;
+  f.store.cleanup(Date.now() + 2 * IMAGE_GRACE_MS);
+  assert.equal((await f.request(f.owner, '/storage')).storage.usedBytes, 0);
+  assert.equal((await f.request(f.owner, '/storage')).storage.today.usedBytes, daily);
+  await f.stop(); await f.start();
+  assert.equal((await f.request(f.owner, '/storage')).storage.today.usedBytes, daily);
+  assert.equal((await f.request(f.owner, '/storage')).storage.usedBytes, 0);
+});
+
+test('每日上传额度覆盖个人和所有团队，转码前拒绝超额文件', {timeout: 60000}, async t => {
+  const f = await fixture(t, {IMAGE_USER_DAILY_MB: '1', IMAGE_MIN_FREE_DISK_MB: '0'});
+  const {note} = await f.request(f.owner, '/notes', 'POST', {folderId: null}, 201);
+  const large = await sharp(randomBytes(512 * 512 * 3), {raw: {width: 512, height: 512, channels: 3}}).png().toBuffer();
+  await f.upload(f.owner, '/notes/' + note.id, large);
+  const {team} = await f.request(f.owner, '/teams', 'POST', {name: '跨空间额度'}, 201), base = '/teams/' + team.id;
+  const shared = (await f.request(f.owner, base + '/notes', 'POST', {folderId: null}, 201)).note;
+  await f.upload(f.owner, base + '/notes/' + shared.id, large, 409);
+  const usage = (await f.request(f.owner, base + '/storage')).storage;
+  assert.equal(usage.usedBytes, 0); assert.equal(usage.today.usedBytes, 0); assert.equal(usage.today.userUsedBytes, large.length);
+  await f.upload(f.owner, base + '/notes/' + shared.id, f.png);
+});
+
+test('上传正文接收前鉴权与两路并发限制，失败后释放容量预留', {timeout: 60000}, async t => {
+  const f = await fixture(t), {note} = await f.request(f.owner, '/notes', 'POST', {folderId: null}, 201), path = '/notes/' + note.id;
+  const open = (who, target = path) => {
+    let resolveResponse, rejectResponse;
+    const result = new Promise((resolve, reject) => { resolveResponse = resolve; rejectResponse = reject; });
+    const req = httpRequest(f.origin + '/api' + target + '/images', {method: 'POST', headers: {Origin: f.origin, ...(who ? {Cookie: who.cookie} : {}), 'Content-Type': 'multipart/form-data; boundary=x'}}, res => { res.resume(); resolveResponse(res.statusCode); });
+    req.on('error', rejectResponse); req.setTimeout(5000, () => req.destroy(new Error('请求超时'))); req.write('--x\r\n');
+    return {req, result};
+  };
+  const anonymous = open(null); t.after(() => anonymous.req.destroy());
+  assert.equal(await anonymous.result, 401, '未登录请求无需发送完整正文即可拒绝'); anonymous.req.destroy();
+  const invalid = open(null, '/notes/not-a-uuid'); t.after(() => invalid.req.destroy());
+  assert.equal(await invalid.result, 401, '无效编号的上传路由也在读取正文前鉴权'); invalid.req.destroy();
+  const outsider = open(f.outsider); t.after(() => outsider.req.destroy());
+  assert.equal(await outsider.result, 404); outsider.req.destroy();
+  const first = open(f.owner), second = open(f.owner); t.after(() => {first.req.destroy(); second.req.destroy();});
+  await new Promise(resolve => setTimeout(resolve, 120));
+  const third = open(f.owner); t.after(() => third.req.destroy());
+  assert.equal(await third.result, 429, '第三条请求在读取正文前被并发限制拒绝'); third.req.destroy();
+  first.req.end(); second.req.end(); assert.deepEqual(await Promise.all([first.result, second.result]), [400, 400]);
+  await f.upload(f.owner, path, f.png);
 });
 
 test('图片清理：正文移除、历史恢复、跨文档引用、回收站、永久删除及未保存上传均遵循 24 小时宽限', {timeout: 60000}, async t => {

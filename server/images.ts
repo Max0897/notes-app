@@ -5,12 +5,15 @@ import sharp, {type OutputInfo} from 'sharp';
 import type Database from 'better-sqlite3';
 import type {Hono, MiddlewareHandler} from 'hono';
 import type {AppContext, AppEnv} from './index.js';
+import {initStorage} from './storage.js';
 
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 export const IMAGE_GRACE_MS = 24 * 60 * 60 * 1000;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 type Row = Record<string, any>;
-type ErrorType = new (status: 400 | 401 | 403 | 404 | 409 | 429, message: string) => Error;
+type ErrorType = new (status: 400 | 401 | 403 | 404 | 409 | 429 | 503, message: string) => Error;
+const uploadPath = /^\/api\/(?:teams\/([^/]+)\/)?notes\/([^/]+)\/images$/;
+export const isImageUpload = (c: AppContext) => c.req.method === 'POST' && uploadPath.test(c.req.path);
 
 export function imageIds(content: unknown): string[] {
   const ids = new Set<string>();
@@ -48,6 +51,9 @@ export function initImages(db: Database.Database, dataDir: string, ApiError: Err
     UPDATE images SET orphaned_at=CAST(strftime('%s','now') AS INTEGER)*1000
       WHERE id=OLD.image_id AND NOT EXISTS(SELECT 1 FROM image_references WHERE image_id=OLD.image_id);
   END;`);
+  const storage = initStorage(db, dataDir, ApiError);
+  const reservations = new WeakMap<AppContext, ReturnType<typeof storage.reserve>>();
+  let uploads = 0;
   const object = "CASE WHEN j.type='object' THEN j.value ELSE '{}' END";
   const nodeType = `json_extract(${object},'$.type')`, imageId = `json_extract(${object},'$.attrs.imageId')`;
   for (const table of ['notes', 'note_history']) {
@@ -99,6 +105,7 @@ export function initImages(db: Database.Database, dataDir: string, ApiError: Err
     }
   }
   function cleanup(now = Date.now()) {
+    storage.cleanup(now);
     // No awaits between the final reference check and unlink: writes cannot race
     // garbage collection in this single-process SQLite deployment.
     const candidates = db.prepare(`SELECT id,filename FROM images WHERE orphaned_at IS NOT NULL AND orphaned_at<=?
@@ -115,16 +122,39 @@ export function initImages(db: Database.Database, dataDir: string, ApiError: Err
       if (statSync(path).mtimeMs <= now - IMAGE_GRACE_MS) rmSync(path, {force: true});
     }
   }
+  // Runs after session/origin checks and before bodyLimit buffers chunked bodies.
+  const uploadGuard: MiddlewareHandler<AppEnv> = async (c, next) => {
+    if (!isImageUpload(c)) return next();
+    const [, rawTeamId, rawNoteId] = uploadPath.exec(c.req.path)!;
+    let teamId: string | undefined, noteId: string;
+    try { teamId = rawTeamId && decodeURIComponent(rawTeamId); noteId = decodeURIComponent(rawNoteId); }
+    catch { fail(404, '备忘录不存在'); }
+    if (!uuid.test(noteId) || teamId && !uuid.test(teamId)) fail(404, '备忘录不存在');
+    const userId = c.get('user')!.id, access = rights(userId, noteId);
+    if (!access || access.note.space_id !== (teamId ?? userId)) fail(404, '备忘录不存在');
+    if (!access.canEdit) fail(403, '此备忘录不可上传图片');
+    if (!/^multipart\/form-data(?:;|$)/i.test(c.req.header('content-type') ?? '')) fail(400, '请通过图片上传表单提交');
+    if (uploads >= 2) fail(429, '图片正在处理中，请稍后重试');
+    const reservation = storage.reserve(userId, access.note.space_id, !!teamId, MAX_IMAGE_BYTES);
+    uploads++; reservations.set(c, reservation);
+    try { await next(); }
+    finally { uploads--; reservations.delete(c); storage.release(reservation); }
+  };
   function register(app: Hono<AppEnv>, requireAuth: MiddlewareHandler<AppEnv>, requireLiveSession: (c: AppContext) => void) {
-    let uploads = 0;
+    app.get('/api/storage', requireAuth, c => c.json({storage: storage.usage(c.get('user')!.id, c.get('user')!.id, false)}));
+    app.get('/api/teams/:teamId/storage', requireAuth, c => {
+      const teamId = c.req.param('teamId'), userId = c.get('user')!.id;
+      if (!db.prepare(`SELECT 1 FROM team_members m JOIN teams t ON t.id=m.team_id WHERE m.team_id=? AND m.user_id=? AND t.deleted_at IS NULL`).get(teamId, userId)) fail(404, '团队不存在或无权访问');
+      return c.json({storage: storage.usage(userId, teamId, true)});
+    });
     for (const prefix of ['/api/notes', '/api/teams/:teamId/notes']) {
       app.post(prefix + '/:id/images', requireAuth, async c => {
         const userId = c.get('user')!.id, noteId = c.req.param('id') ?? '';
         const access = rights(userId, noteId);
         if (!access || access.note.space_id !== (c.req.param('teamId') ?? userId)) fail(404, '备忘录不存在');
         if (!access.canEdit) fail(403, '此备忘录不可上传图片');
-        if (uploads >= 2) fail(429, '图片正在处理中，请稍后重试');
-        uploads++;
+        const reservation = reservations.get(c);
+        if (!reservation) throw new Error('图片上传缺少额度预留');
         let path: string | undefined;
         try {
           if (!/^multipart\/form-data(?:;|$)/i.test(c.req.header('content-type') ?? '')) fail(400, '请通过图片上传表单提交');
@@ -133,6 +163,9 @@ export function initImages(db: Database.Database, dataDir: string, ApiError: Err
           const file = form.get('file');
           if (form.getAll('file').length !== 1 || [...form.keys()].some(key => key !== 'file') || !file || typeof file === 'string') fail(400, '每次上传一张图片');
           if (!file.size || file.size > MAX_IMAGE_BYTES) fail(400, '图片大小须在 10 MB 以内');
+          requireLiveSession(c);
+          // Count received source bytes independently of deletion and decoding.
+          storage.charge(reservation, file.size);
           let output: {data: Buffer; info: OutputInfo};
           try {
             const bytes = Buffer.from(await file.arrayBuffer());
@@ -148,14 +181,16 @@ export function initImages(db: Database.Database, dataDir: string, ApiError: Err
           requireLiveSession(c);
           const current = rights(userId, noteId);
           if (!current || !current.canEdit || current.note.space_id !== access.note.space_id) fail(403, '备忘录访问权限已变化');
+          storage.checkOutput(reservation, output.data.length);
           const id = randomUUID(), filename = id + '.webp', now = Date.now();
           path = resolve(directory, filename);
           writeFileSync(path, output.data, {flag: 'wx', mode: 0o600});
           db.prepare(`INSERT INTO images(id,space_id,uploaded_by,upload_note_id,filename,mime,size,width,height,created_at,orphaned_at)
             VALUES(?,?,?,?,?,'image/webp',?,?,?,?,?)`).run(id, current.note.space_id, userId, noteId, filename, output.data.length, output.info.width, output.info.height, now, now);
+          storage.release(reservation);
           path = undefined;
           return c.json({image: {id, src: '/api/images/' + id, width: output.info.width, height: output.info.height}}, 201);
-        } finally { uploads--; if (path) rmSync(path, {force: true}); }
+        } finally { if (path) rmSync(path, {force: true}); }
       });
     }
     app.get('/api/images/:imageId', requireAuth, c => {
@@ -171,5 +206,5 @@ export function initImages(db: Database.Database, dataDir: string, ApiError: Err
       return c.body(new Uint8Array(readFileSync(path)));
     });
   }
-  return {validateReferences, cleanup, register};
+  return {validateReferences, cleanup, register, uploadGuard};
 }

@@ -13,7 +13,7 @@
     "test:api": "node --test tests/api.test.mjs tests/management.test.mjs tests/teams.test.mjs tests/notifications.test.mjs",
     "test:collaboration": "node --import tsx --test tests/realtime.test.mjs",
     "test:notebook": "node --import tsx --test tests/notebook.test.mjs",
-    "test:images": "node --import tsx --test tests/images.test.mjs",
+    "test:images": "node --import tsx --test tests/images.test.mjs tests/storage.test.mjs",
     "test:editor-images": "tsx --tsconfig tsconfig.app.json tests/editor-images.test.mjs",
     "test:docker": "node tests/docker-config-check.mjs",
     "test:e2e": "node tests/e2e-public.mjs",

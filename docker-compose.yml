@@ -26,6 +26,12 @@ services:
       # 可选：仅列出受信任代理的实际 TCP 对端 IP，允许其传入 CF-Connecting-IP。
       # 不要填写公网客户端地址或任意来源；留空时不信任转发头。
       TRUSTED_PROXY_IPS: ""
+      IMAGE_PERSONAL_LIMIT_MB: "${IMAGE_PERSONAL_LIMIT_MB:-200}"
+      IMAGE_TEAM_LIMIT_MB: "${IMAGE_TEAM_LIMIT_MB:-1024}"
+      IMAGE_USER_DAILY_MB: "${IMAGE_USER_DAILY_MB:-100}"
+      IMAGE_TEAM_DAILY_MB: "${IMAGE_TEAM_DAILY_MB:-500}"
+      IMAGE_GLOBAL_LIMIT_MB: "${IMAGE_GLOBAL_LIMIT_MB:-20480}"
+      IMAGE_MIN_FREE_DISK_MB: "${IMAGE_MIN_FREE_DISK_MB:-10240}"
     volumes:
       # 具名卷跨平台最省事，Docker 会按镜像里的属主初始化目录。
       - notes-data:/data

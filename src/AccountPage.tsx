@@ -4,6 +4,7 @@ import {RefreshCw} from 'lucide-react';
 import {api, type User} from './api';
 import {UserAvatar} from './UserAvatar';
 import {WorkspacePage} from './WorkspacePage';
+import {StorageDetails} from './StorageUsage';
 
 export function AccountPage({user, onUserChange, onMenu}: {user: User; onUserChange: (user: User) => void; onMenu: () => void}) {
   const {username} = user;
@@ -73,6 +74,7 @@ export function AccountPage({user, onUserChange, onMenu}: {user: User; onUserCha
           <Typography.Text type="secondary">昵称用于协作光标、在线状态和成员列表；登录及邀请仍使用用户名。</Typography.Text>
           <Button type="primary" htmlType="submit" loading={profileBusy} disabled={!nickname.trim() || nickname.trim() === user.nickname}>保存资料</Button>
         </form>
+        <StorageDetails userId={user.id}/>
       </Tabs.TabPane>
       <Tabs.TabPane key="avatar" title="头像" disabled={busy}>
         <div className="avatar-settings">
