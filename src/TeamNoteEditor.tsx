@@ -8,6 +8,7 @@ import Collaboration from '@tiptap/extension-collaboration';
 import CollaborationCursor from '@tiptap/extension-collaboration-cursor';
 import * as Y from 'yjs';
 import {EditorLink, openEditorLink} from './editorLinks';
+import {EditorImage, ImageUploads, hasImageUploads, finishImageUploads} from './editorImages';
 import {EditorTools} from './EditorTools';
 import {EditorContextMenu} from './EditorContextMenu';
 import {SaveStatus} from './SaveStatus';
@@ -25,7 +26,7 @@ export const TeamNoteEditor = forwardRef<EditorBridge, Props>(function TeamNoteE
   const inner = useRef<EditorBridge | null>(null);
   useImperativeHandle(bridge, () => ({
     flush: () => inner.current?.flush() ?? Promise.resolve(!session?.hasChanges()), snapshot: () => inner.current?.snapshot() ?? props.note,
-    hasChanges: () => session?.hasChanges() ?? false, draft: () => inner.current?.draft() ?? '',
+    hasChanges: () => inner.current?.hasChanges() ?? session?.hasChanges() ?? false, draft: () => inner.current?.draft() ?? '',
   }), [session, props.note]);
   useEffect(() => {
     const url = new URL('/api/collaboration', location.href); url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -40,7 +41,7 @@ export const TeamNoteEditor = forwardRef<EditorBridge, Props>(function TeamNoteE
   return <CollaborativeEditor {...props} session={session} state={state} ref={inner}/>;
 });
 
-const CollaborativeEditor = forwardRef<EditorBridge, Props & {session: CollaborationSession; state: CollaborationState}>(function CollaborativeEditor({note, onSave, readOnly, session, state, onComment}, bridge) {
+const CollaborativeEditor = forwardRef<EditorBridge, Props & {session: CollaborationSession; state: CollaborationState}>(function CollaborativeEditor({note, onSave, readOnly, session, state, onComment, teamId}, bridge) {
   const modifiedTitle = useHintTitle('最后修改：' + (state.note?.modifiedBy ?? note.modifiedBy ?? '团队成员'));
   const latest = useRef(note), onSaveRef = useRef(onSave);
   useEffect(() => { onSaveRef.current = onSave; }, [onSave]);
@@ -54,7 +55,8 @@ const CollaborativeEditor = forwardRef<EditorBridge, Props & {session: Collabora
   const editable = !readOnly && state.canEdit && !state.error;
   function editing() { session.setEditing(true); clearTimeout(idle.current); idle.current = setTimeout(() => session.setEditing(false), 3000); }
   const editor = useEditor({
-    extensions: [StarterKit.configure({history: false}), TaskList, TaskItem.configure({nested: true}), EditorLink,
+    extensions: [StarterKit.configure({history: false}), TaskList, TaskItem.configure({nested: true}), EditorLink, EditorImage,
+      ImageUploads.configure({path: '/api/teams/' + teamId + '/notes/' + note.id + '/images'}),
       Collaboration.configure({document: session.document}),
       CollaborationCursor.configure({provider: session.provider, user: state.me,
         render: user => {
@@ -101,6 +103,7 @@ const CollaborativeEditor = forwardRef<EditorBridge, Props & {session: Collabora
   }, [state.note, state.saved, editor]);
   useEffect(() => { if (note.version > latest.current.version) latest.current = note; }, [note]);
   async function flush() {
+    if (!await finishImageUploads(editor)) return false;
     const ok = await session.flush();
     // Mutation handlers read snapshot() immediately after awaiting flush, before React effects.
     if (ok && session.state.note && editor && session.state.note.version >= latest.current.version) {
@@ -110,12 +113,12 @@ const CollaborativeEditor = forwardRef<EditorBridge, Props & {session: Collabora
     if (!ok) Message.warning(state.error || '尚有内容未保存，请等待连接恢复后重试');
     return ok;
   }
-  useImperativeHandle(bridge, () => ({flush, snapshot: () => latest.current, hasChanges: () => session.hasChanges(), draft: () => titleText.toString() + '\n\n' + (editor?.getText() ?? '')}));
+  useImperativeHandle(bridge, () => ({flush, snapshot: () => latest.current, hasChanges: () => session.hasChanges() || hasImageUploads(editor), draft: () => titleText.toString() + '\n\n' + (editor?.getText() ?? '')}));
   useEffect(() => {
-    const warn = (event: BeforeUnloadEvent) => { if (session.hasChanges()) { event.preventDefault(); event.returnValue = ''; } };
+    const warn = (event: BeforeUnloadEvent) => { if (session.hasChanges() || hasImageUploads(editor)) { event.preventDefault(); event.returnValue = ''; } };
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
-  }, [session]);
+  }, [session, editor]);
   function changeTitle(value: string, base = titleText.toString()) {
     // Apply only the changed interval. Concurrent text outside it is retained.
     let start = 0, end = 0;

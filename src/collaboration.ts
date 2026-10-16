@@ -37,7 +37,7 @@ export class CollaborationSession {
     this.socket = new HocuspocusProviderWebsocket({url, autoConnect: false, maxDelay: 5000, ...websocketOptions});
     this.provider = new HocuspocusProvider({
       websocketProvider: this.socket, name: `team:${teamId}:note:${noteId}`, document: this.document,
-      token: 'session', flushDelay: 50,
+      token: 'notes-images-v2', flushDelay: 50,
       onStatus: ({status}) => { this.state.connected = status === 'connected'; this.publish(); },
       onDisconnect: () => { this.state.connected = false; this.publish(); },
       onSynced: ({state}) => {

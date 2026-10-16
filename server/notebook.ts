@@ -40,6 +40,7 @@ export function registerNotebook(app: Hono<AppEnv>, db: Database.Database, deps:
   requireAuth: MiddlewareHandler<AppEnv>; requireLiveSession: (c: AppContext) => void;
   readBody: (c: AppContext, keys: readonly string[]) => Promise<JsonObject>;
   validateContent: (value: unknown) => JsonObject;
+  validateImages: (value: unknown, spaceId: string, userId: string, noteId?: string) => void;
   ApiError: new (status: 400 | 401 | 403 | 404 | 409 | 429, message: string) => Error;
   restore: (teamId: string, noteId: string, actorId: string, title: string, content: JsonObject) => () => void;
 }) {
@@ -99,7 +100,7 @@ export function registerNotebook(app: Hono<AppEnv>, db: Database.Database, deps:
         if (body.version !== row.version) fail(409, '备忘录已更新，请刷新历史记录后重试');
         const h = db.prepare('SELECT * FROM note_history WHERE id=? AND note_id=?').get(c.req.param('historyId'), row.id) as Row | undefined;
         if (!h) fail(404, '历史版本不存在');
-        const content = validateContent(JSON.parse(h.content)); checkpoint(row);
+        const content = validateContent(JSON.parse(h.content)); deps.validateImages(content, row.space_id, uid(c), row.id); checkpoint(row);
         if (row.space_id !== row.user_id) broadcast = deps.restore(row.space_id, row.id, uid(c), h.title, content);
         else db.prepare('UPDATE notes SET title=?,content=?,plain_text=?,version=version+1,updated_by=?,updated_at=? WHERE id=?')
           .run(h.title, JSON.stringify(content), plainText(content as any), uid(c), new Date().toISOString(), row.id);
@@ -210,6 +211,7 @@ export function registerNotebook(app: Hono<AppEnv>, db: Database.Database, deps:
         if (!rights.canEdit) fail(403, '此位置不可导入');
         if (folderId && !db.prepare('SELECT 1 FROM folders WHERE id=? AND space_id=? AND deleted_at IS NULL').get(folderId, spaceId)) fail(404, '文件夹不存在');
         return parsed.map(file => {
+          deps.validateImages(file.content, spaceId, uid(c));
           const noteId = randomUUID(), now = new Date().toISOString();
           db.prepare('INSERT INTO notes(id,user_id,space_id,title,content,plain_text,folder_id,updated_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)')
             .run(noteId, uid(c), spaceId, file.title, JSON.stringify(file.content), file.plain, folderId, uid(c), now, now);

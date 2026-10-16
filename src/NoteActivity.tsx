@@ -6,6 +6,7 @@ import StarterKit from '@tiptap/starter-kit';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
 import {EditorLink, openEditorLink} from './editorLinks';
+import {EditorImage} from './editorImages';
 import {api, type EditorBridge, type Note, type User} from './api';
 import {CommentComposer} from './CommentComposer';
 import type {MentionMember} from './commentMentions';
@@ -25,7 +26,7 @@ async function commentPages(path: string, count: number) {
   return {...result, comments, next};
 }
 function Preview({content}: {content: any}) {
-  const editor = useEditor({extensions: [StarterKit, TaskList, TaskItem.configure({nested: true}), EditorLink], content, editable: false,
+  const editor = useEditor({extensions: [StarterKit, TaskList, TaskItem.configure({nested: true}), EditorLink, EditorImage], content, editable: false,
     editorProps: {handleDOMEvents: {click: (_view, event) => openEditorLink(event)}}});
   return <div className="snapshot-preview"><EditorContent editor={editor}/></div>;
 }

@@ -8,6 +8,7 @@ import StarterKit from '@tiptap/starter-kit';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
 import Link from '@tiptap/extension-link';
+import Image from '@tiptap/extension-image';
 import {prosemirrorJSONToYDoc, prosemirrorJSONToYXmlFragment, yDocToProsemirrorJSON} from 'y-prosemirror';
 import * as decoding from 'lib0/decoding';
 import type Database from 'better-sqlite3';
@@ -21,11 +22,12 @@ const colors = ['#2563eb', '#dc2626', '#059669', '#9333ea', '#d97706', '#0891b2'
 // 与浏览器编辑器使用同一套节点；链接不引入不被 API 接受的 class 属性。
 const schema = getSchema([StarterKit.configure({history: false}), TaskList, TaskItem.configure({nested: true}), Link.extend({
   addAttributes() { const {class: _class, ...attrs} = (this.parent?.() ?? {}) as Record<string, any>; return attrs; },
-})]);
+}), Image.extend({addAttributes() { return {...this.parent?.(), imageId: {default: null}, width: {default: null}}; }})]);
 const stamp = (doc: Y.Doc) => Buffer.from(Y.encodeSnapshot(Y.snapshot(doc))).toString('base64');
 
 export function createRealtime(db: Database.Database, options: {
   cookieName: string; publicOrigin: string; validateContent: (value: unknown) => Record<string, unknown>;
+  validateImages?: (value: unknown, spaceId: string, userId: string, noteId?: string) => void;
 }) {
   db.exec(`CREATE TABLE IF NOT EXISTS collaboration_documents (
     note_id TEXT PRIMARY KEY REFERENCES notes(id) ON DELETE CASCADE,
@@ -103,6 +105,7 @@ export function createRealtime(db: Database.Database, options: {
     db.transaction(() => {
       const row = db.prepare('SELECT * FROM notes WHERE id=?').get(noteId) as Row | undefined;
       if (!row) denied();
+      options.validateImages?.(value.json, row.space_id, actor ?? row.updated_by, noteId);
       db.prepare(`INSERT INTO collaboration_documents VALUES(?,?,?) ON CONFLICT(note_id) DO UPDATE SET state=excluded.state,updated_at=excluded.updated_at`).run(noteId, state, now);
       if (row.title !== value.title || row.content !== json) {
         db.prepare('UPDATE notes SET title=?,content=?,plain_text=?,version=version+1,updated_at=?,updated_by=? WHERE id=?')
@@ -160,7 +163,10 @@ export function createRealtime(db: Database.Database, options: {
   const instance = new Hocuspocus<Identity>({
     quiet: true, timeout: 30000, debounce: 1000, maxDebounce: 3000,
     maxPendingDocuments: 1, maxUnauthenticatedQueueSize: 1024 * 1024, maxUnauthenticatedQueueMessages: 100,
-    async onAuthenticate({documentName, requestHeaders, connectionConfig}) {
+    async onAuthenticate({documentName, requestHeaders, connectionConfig, token}) {
+      // Older editors can strip image nodes or their persisted display width.
+      // This is a schema capability marker; authentication still uses cookies.
+      if (token !== 'notes-images-v2') denied('编辑器已更新，请刷新页面后重新打开');
       const identity = session(requestHeaders.get('cookie'));
       const permission = access(documentName, identity);
       connectionConfig.readOnly = !permission.canEdit;

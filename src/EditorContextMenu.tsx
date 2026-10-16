@@ -1,7 +1,8 @@
 import {useState, type KeyboardEvent, type MouseEvent} from 'react';
 import {Dropdown, Menu, Message} from '@arco-design/web-react';
 import {EditorContent, useEditorState, type Editor} from '@tiptap/react';
-import {Bold, Check, ClipboardPaste, Code, Copy, Eraser, Heading2, Italic, List, ListChecks, ListOrdered, MessageSquare, Minus, Plus, Quote, Redo2, Scissors, SquareDashed, Strikethrough, Type, Undo2} from 'lucide-react';
+import {Bold, Check, ClipboardPaste, Code, Copy, Eraser, Heading2, ImagePlus, Italic, List, ListChecks, ListOrdered, MessageSquare, Minus, Plus, Quote, Redo2, Scissors, SquareDashed, Strikethrough, Type, Undo2} from 'lucide-react';
+import {chooseImages} from './editorImages';
 
 function Label({Icon, text, shortcut, active}: {Icon: typeof Bold; text: string; shortcut?: string; active?: boolean}) {
   return <span className="editor-context-option"><span className="ico-label"><Icon size={16}/><span>{text}</span></span>
@@ -27,6 +28,13 @@ export function EditorContextMenu({editor, disabled = false, onComment}: {editor
         let html = '', text = '';
         if (navigator.clipboard?.read) {
           const items = await navigator.clipboard.read();
+          const image = items.find(item => item.types.some(type => ['image/png', 'image/jpeg', 'image/webp'].includes(type)));
+          if (image) {
+            const type = image.types.find(type => ['image/png', 'image/jpeg', 'image/webp'].includes(type))!;
+            const blob = await image.getType(type);
+            if (!editor.isDestroyed && editor.isEditable) editor.commands.uploadImages([new File([blob], '粘贴图片', {type})]);
+            return;
+          }
           const item = items.find(item => item.types.includes('text/html') || item.types.includes('text/plain'));
           if (item?.types.includes('text/html')) html = await (await item.getType('text/html')).text();
           else if (item?.types.includes('text/plain')) text = await (await item.getType('text/plain')).text();
@@ -72,6 +80,7 @@ export function EditorContextMenu({editor, disabled = false, onComment}: {editor
     {key: 'clear', label: '清除格式', Icon: Eraser, run: () => editor.chain().focus().unsetAllMarks().clearNodes().run()},
   ] : [];
   const inserts = editor ? [
+    {key: 'image', label: '图片', Icon: ImagePlus, run: () => chooseImages(editor)},
     {key: 'bullet', label: '无序列表', Icon: List, active: editor.isActive('bulletList'), run: () => editor.chain().focus().toggleBulletList().run()},
     {key: 'ordered', label: '有序列表', Icon: ListOrdered, active: editor.isActive('orderedList'), run: () => editor.chain().focus().toggleOrderedList().run()},
     {key: 'tasks', label: '待办清单', Icon: ListChecks, active: editor.isActive('taskList'), run: () => editor.chain().focus().toggleTaskList().run()},

@@ -5,6 +5,7 @@ import StarterKit from '@tiptap/starter-kit';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
 import {EditorLink,openEditorLink} from './editorLinks';
+import {EditorImage, ImageUploads, hasImageUploads, finishImageUploads} from './editorImages';
 import {api,ApiError,type Note,type EditorBridge} from './api';
 import type {User} from './api';
 import {EditorTools} from './EditorTools';
@@ -34,7 +35,7 @@ const latest=useRef(note),dirty=useRef(false),timer=useRef<ReturnType<typeof set
 // 最近一次成功入库的正文，用于判断「这次变更是否真的改了内容」
 const savedContent=useRef(canon(note.content));
 const conflictRef=useRef<Note|null>(null);
-const editor=useEditor({extensions:[StarterKit,TaskList,TaskItem.configure({nested:true}),EditorLink],editorProps:{handleDOMEvents:{click:(_view,event)=>openEditorLink(event)}},content:note.content,editable:!note.deletedAt&&!readOnly&&!recovery,onUpdate:({editor,transaction})=>{
+const editor=useEditor({extensions:[StarterKit,TaskList,TaskItem.configure({nested:true}),EditorLink,EditorImage,ImageUploads.configure({path:'/api'+(teamId?'/teams/'+teamId:'')+'/notes/'+note.id+'/images'})],editorProps:{handleDOMEvents:{click:(_view,event)=>openEditorLink(event)}},content:note.content,editable:!note.deletedAt&&!readOnly&&!recovery,onUpdate:({editor,transaction})=>{
   if(!transaction.docChanged)return;
   // Tiptap 在聚焦、选区变化等情况下也会触发 update，此时文档其实没变。
   // 若一律标脏，单纯「点开一篇笔记」就会保存一次并刷新修改时间，笔记随即跳到列表最前。
@@ -43,12 +44,12 @@ const editor=useEditor({extensions:[StarterKit,TaskList,TaskItem.configure({nest
 }});
 const titleRef=useRef(title);
 function changed(){setDraftError(!draftStore.write({...noteDraft(latest.current),title:titleRef.current,content:editor?.getJSON()||latest.current.content,plainText:editor?.getText()||''}));dirty.current=true;revision.current++;setStatus('尚未保存');clearTimeout(timer.current);timer.current=setTimeout(()=>void flush(),700);}
-async function flush():Promise<boolean>{if(recoveryRef.current){Message.warning('请先恢复或丢弃本地草稿');return false;}clearTimeout(timer.current);if(pending.current){const ok=await pending.current;if(!ok)return false;if(dirty.current&&!conflictRef.current)return flush();return !dirty.current;}if(!dirty.current)return true;if(conflictRef.current){Message.warning('请先处理版本冲突');return false;}const r=revision.current;setStatus('保存中…');pending.current=(async()=>{try{const d=await noteApi('/notes/'+note.id,'PATCH',{version:latest.current.version,title:titleRef.current,content:editor?.getJSON()||latest.current.content,plainText:editor?.getText()||''});latest.current=d.note;savedContent.current=canon(d.note.content);onSave(d.note);if(r===revision.current){dirty.current=false;draftStore.clear();setStatus('已保存');}return true;}catch(e){if(e instanceof ApiError&&e.status===409&&e.data.note){conflictRef.current=e.data.note;setConflict(e.data.note);setStatus('版本冲突');}else setStatus('保存失败，点击重试');Message.error((e as Error).message);return false;}finally{pending.current=null;}})();const ok=await pending.current;if(ok&&dirty.current)return flush();return ok;}
+async function flush():Promise<boolean>{if(!await finishImageUploads(editor))return false;if(recoveryRef.current){Message.warning('请先恢复或丢弃本地草稿');return false;}clearTimeout(timer.current);if(pending.current){const ok=await pending.current;if(!ok)return false;if(dirty.current&&!conflictRef.current)return flush();return !dirty.current;}if(!dirty.current)return true;if(conflictRef.current){Message.warning('请先处理版本冲突');return false;}const r=revision.current;setStatus('保存中…');pending.current=(async()=>{try{const d=await noteApi('/notes/'+note.id,'PATCH',{version:latest.current.version,title:titleRef.current,content:editor?.getJSON()||latest.current.content,plainText:editor?.getText()||''});latest.current=d.note;savedContent.current=canon(d.note.content);onSave(d.note);if(r===revision.current){dirty.current=false;draftStore.clear();setStatus('已保存');}return true;}catch(e){if(e instanceof ApiError&&e.status===409&&e.data.note){conflictRef.current=e.data.note;setConflict(e.data.note);setStatus('版本冲突');}else setStatus('保存失败，点击重试');Message.error((e as Error).message);return false;}finally{pending.current=null;}})();const ok=await pending.current;if(ok&&dirty.current)return flush();return ok;}
 // 对外提供最新的保存函数与版本；重新渲染不会清除尚未触发的自动保存计时器。
-useImperativeHandle(bridge,()=>({flush,snapshot:()=>latest.current,hasChanges:()=>dirty.current,draft:()=>titleRef.current+'\n\n'+(editor?.getText()||'')}));
+useImperativeHandle(bridge,()=>({flush,snapshot:()=>latest.current,hasChanges:()=>dirty.current||hasImageUploads(editor),draft:()=>titleRef.current+'\n\n'+(editor?.getText()||'')}));
 useEffect(()=>()=>clearTimeout(timer.current),[]);
 useEffect(()=>{editor?.setEditable(!note.deletedAt&&!readOnly&&!recovery);if(dirty.current&&note.version>latest.current.version&&!conflictRef.current)setStatus('其他成员已更新，保存时将检查冲突');if(!dirty.current&&!pending.current){latest.current=note;titleRef.current=note.title;setTitle(note.title);if(editor&&canon(editor.getJSON())!==canon(note.content))editor.commands.setContent(note.content,false);savedContent.current=canon(note.content);}},[note,editor,readOnly,recovery]);
-useEffect(()=>{const warn=(e:BeforeUnloadEvent)=>{if(dirty.current){e.preventDefault();e.returnValue='';}};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn);},[]);
+useEffect(()=>{const warn=(e:BeforeUnloadEvent)=>{if(dirty.current||hasImageUploads(editor)){e.preventDefault();e.returnValue='';}};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn);},[editor]);
 const collaborationText=teamId?[note.modifiedBy&&'最后修改：'+note.modifiedBy,activeEditors.length>0&&activeEditors.join('、')+' 正在编辑'].filter(Boolean).join(' · '):'';
 const collaborationTitle=useHintTitle(collaborationText);
 return <>

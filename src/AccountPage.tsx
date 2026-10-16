@@ -62,8 +62,14 @@ export function AccountPage({user, onUserChange, onMenu}: {user: User; onUserCha
           try { const data = await api('/auth/profile', 'PATCH', {nickname}); onUserChange(data.user); setNickname(data.user.nickname); Message.success('昵称已保存'); }
           catch (error) { Message.error((error as Error).message); } finally { setProfileBusy(false); }
         }}>
-          <Input value={username} readOnly aria-label="登录用户名" placeholder="登录用户名"/>
-          <Input value={nickname} onChange={setNickname} maxLength={64} aria-label="昵称" placeholder="昵称（1–32 个字符）" disabled={profileBusy}/>
+          <div className="account-form-field">
+            <label htmlFor="profile-username">登录用户名</label>
+            <Input id="profile-username" value={username} readOnly aria-label="登录用户名" placeholder="登录用户名"/>
+          </div>
+          <div className="account-form-field">
+            <label htmlFor="profile-nickname">昵称</label>
+            <Input id="profile-nickname" value={nickname} onChange={setNickname} maxLength={64} aria-label="昵称" placeholder="昵称（1–32 个字符）" disabled={profileBusy}/>
+          </div>
           <Typography.Text type="secondary">昵称用于协作光标、在线状态和成员列表；登录及邀请仍使用用户名。</Typography.Text>
           <Button type="primary" htmlType="submit" loading={profileBusy} disabled={!nickname.trim() || nickname.trim() === user.nickname}>保存资料</Button>
         </form>

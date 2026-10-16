@@ -15,6 +15,7 @@ import {initCollaboration, registerCollaboration} from './teams.js';
 import {initNotifications, registerNotifications} from './notifications.js';
 import {createRealtime} from './realtime.js';
 import {initNotebook, registerNotebook} from './notebook.js';
+import {initImages, MAX_IMAGE_BYTES} from './images.js';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const production = process.env.NODE_ENV === 'production';
@@ -161,7 +162,7 @@ function deletionDate(value: unknown): string | null {
   return date.toISOString();
 }
 
-const blockNodes = new Set(['paragraph', 'heading', 'blockquote', 'bulletList', 'orderedList', 'codeBlock', 'horizontalRule', 'taskList', 'table']);
+const blockNodes = new Set(['paragraph', 'heading', 'blockquote', 'bulletList', 'orderedList', 'codeBlock', 'horizontalRule', 'taskList', 'table', 'image']);
 const markTypes = new Set(['bold', 'italic', 'strike', 'underline', 'code', 'link', 'textStyle', 'highlight', 'subscript', 'superscript']);
 function safeLink(value: unknown): boolean {
   if (typeof value !== 'string' || value.length === 0 || value.length > 2048 || /[\s\u0000-\u001f\u007f-\u009f\\]/u.test(value)) return false;
@@ -185,6 +186,7 @@ function validateAttrs(type: string, value: unknown, mark = false) {
   const allowed = mark
     ? type === 'link' ? ['href', 'target', 'rel', 'title'] : type === 'textStyle' || type === 'highlight' ? ['color'] : []
     : type === 'heading' ? ['level', 'textAlign']
+      : type === 'image' ? ['imageId', 'src', 'alt', 'title', 'width']
       : type === 'paragraph' ? ['textAlign']
         : type === 'orderedList' ? ['start', 'type']
           : type === 'codeBlock' ? ['language']
@@ -205,8 +207,11 @@ function validateAttrs(type: string, value: unknown, mark = false) {
     if (key === 'target' && attr !== null && (typeof attr !== 'string' || !['_blank', '_self'].includes(attr))) invalid('链接打开方式无效');
     if (key === 'rel' && attr !== null && (typeof attr !== 'string' || !/^(?:(?:noopener|noreferrer|nofollow)(?:\s+|$))*$/.test(attr))) invalid('链接 rel 属性无效');
     if (key === 'title' && attr !== null && (typeof attr !== 'string' || attr.length > 200)) invalid('链接标题过长');
+    if (key === 'alt' && attr !== null && (typeof attr !== 'string' || attr.length > 200)) invalid('图片描述过长');
+    if (key === 'width' && attr !== null && (!Number.isInteger(attr) || Number(attr) < 80 || Number(attr) > 4096)) invalid('图片宽度须为 80 至 4096 像素');
   }
   if (mark && type === 'link' && !safeLink(value.href)) invalid('正文链接缺少有效地址');
+  if (!mark && type === 'image' && (!validId(value.imageId) || value.imageId !== String(value.imageId).toLowerCase() || value.src !== '/api/images/' + value.imageId)) invalid('图片引用无效，请先上传图片');
 }
 function validateContent(value: unknown): JsonObject {
   if (!isObject(value) || value.type !== 'doc') invalid('正文必须为 Tiptap doc JSON');
@@ -235,6 +240,7 @@ function validateContent(value: unknown): JsonObject {
     } else {
       if (has(node, 'text')) invalid('非文本节点不能包含 text 字段');
       validateAttrs(type, node.attrs);
+      if (type === 'image' && !isObject(node.attrs)) invalid('图片缺少有效引用');
       if (type === 'heading' && (!isObject(node.attrs) || !has(node.attrs, 'level'))) invalid('标题节点缺少层级');
       if (type === 'taskItem' && (!isObject(node.attrs) || typeof node.attrs.checked !== 'boolean')) invalid('待办节点缺少状态');
     }
@@ -250,7 +256,7 @@ function validateContent(value: unknown): JsonObject {
       }
     }
     if (has(node, 'content')) {
-      if (type === 'text' || type === 'hardBreak' || type === 'horizontalRule' || !Array.isArray(node.content)) invalid('正文子节点格式无效');
+      if (type === 'text' || type === 'hardBreak' || type === 'horizontalRule' || type === 'image' || !Array.isArray(node.content)) invalid('正文子节点格式无效');
       for (const child of node.content) walk(child, depth + 1, type);
     }
   };
@@ -309,14 +315,17 @@ db.exec(`
 if (!(db.prepare('PRAGMA table_info(users)').all() as {name: string}[]).some(column => column.name === 'nickname')) db.exec("ALTER TABLE users ADD COLUMN nickname TEXT NOT NULL DEFAULT ''");
 const collaboration = initCollaboration(db);
 initNotebook(db);
-const realtime = createRealtime(db, {cookieName: COOKIE_NAME, publicOrigin, validateContent});
+const images = initImages(db, dataDir, ApiError);
+const realtime = createRealtime(db, {cookieName: COOKIE_NAME, publicOrigin, validateContent, validateImages: images.validateReferences});
 initNotifications(db);
 collaboration.cleanup();
+images.cleanup();
 const deleteExpiredSessions = db.prepare('DELETE FROM sessions WHERE expires_at <= ?');
 deleteExpiredSessions.run(Date.now());
 const maintenance = setInterval(() => {
   deleteExpiredSessions.run(Date.now());
   try { collaboration.cleanup(); } catch (error) { console.error('团队维护失败', error); }
+  try { images.cleanup(); } catch (error) { console.error('图片清理失败', error); }
   const now = Date.now();
   for (const [key, bucket] of buckets) if (bucket.resetAt <= now) buckets.delete(key);
 }, 60_000);
@@ -399,6 +408,7 @@ async function passwordJob<T>(work: () => Promise<T>): Promise<T> {
 
 export const app = new Hono<AppEnv>();
 app.onError((error, c) => {
+  if (error.message.includes('images_invalid_reference')) return c.json({error: '图片不存在或不属于当前空间，请重新上传'}, 400);
   if (error instanceof ApiError) {
     if (error.status === 429) c.header('Retry-After', '5');
     return c.json({ error: error.message }, error.status);
@@ -464,7 +474,7 @@ app.use('/api/*', async (c, next) => {
   // Revoke live sockets before any subsequent broadcasts after an API mutation.
   if (!['GET', 'HEAD', 'OPTIONS'].includes(c.req.method)) realtime.revalidate();
 });
-app.use('/api/*', (c, next) => bodyLimit({maxSize: MAX_BODY_BYTES, onError: ctx => ctx.json({error: '请求正文超过大小限制'}, 413)})(c, next));
+app.use('/api/*', (c, next) => bodyLimit({maxSize: c.req.method === 'POST' && /^\/api\/(?:teams\/[0-9a-f-]{36}\/)?notes\/[0-9a-f-]{36}\/images$/.test(c.req.path) ? MAX_IMAGE_BYTES + 64 * 1024 : MAX_BODY_BYTES, onError: ctx => ctx.json({error: '请求正文超过大小限制'}, 413)})(c, next));
 const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
   if (!c.get('user')) {
     clearSessionCookie(c);
@@ -600,9 +610,10 @@ app.post('/api/auth/logout-others', requireAuth, async c => {
   return c.json({ ok: true, revokedSessions: result.changes });
 });
 
-registerCollaboration(app, db, {readBody, requireAuth, requireLiveSession, verifyCurrentPassword, validateContent, folderName, ApiError, dataDir});
+images.register(app, requireAuth, requireLiveSession);
+registerCollaboration(app, db, {readBody, requireAuth, requireLiveSession, verifyCurrentPassword, validateContent, validateImages: images.validateReferences, folderName, ApiError, dataDir});
 registerNotifications(app, db, {readBody, requireAuth, requireLiveSession, ApiError});
-registerNotebook(app, db, {readBody, requireAuth, requireLiveSession, validateContent, ApiError, restore: realtime.restore});
+registerNotebook(app, db, {readBody, requireAuth, requireLiveSession, validateContent, validateImages: images.validateReferences, ApiError, restore: realtime.restore});
 
 app.use('/api/folders', requireAuth);
 app.use('/api/folders/*', requireAuth);
@@ -732,6 +743,7 @@ app.patch('/api/notes/:id', async (c) => {
   const result = db.transaction(() => {
     const current = ownedNote(id, userId);
     if (current.version !== body.version) return { conflict: true as const, note: noteFromRow(current) };
+    if (has(body, 'content')) images.validateReferences(body.content, userId, userId, id);
     if (has(body, 'folderId') && body.folderId !== null) ownedFolder(body.folderId as string, userId);
     const currentValues: Record<string, string | number | null> = {
       title: current.title, content: current.content, plain_text: current.plain_text,

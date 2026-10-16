@@ -3,6 +3,20 @@
 *{box-sizing:border-box}
 html,body,#root{height:100%;margin:0;min-width:0}
 body{overflow:hidden}
+.ProseMirror .editor-image{position:relative;width:fit-content;margin:16px 0;max-width:100%;border-radius:4px;line-height:0}
+.ProseMirror .editor-image img{display:block;max-width:100%;height:auto;border-radius:4px;cursor:zoom-in}
+.ProseMirror .editor-image.ProseMirror-selectednode{outline:2px solid rgb(var(--primary-6));outline-offset:3px}
+.ProseMirror .image-resize-handle{position:absolute;right:0;bottom:0;width:28px;height:28px;padding:0;border:0;background:transparent;cursor:nwse-resize;touch-action:none;opacity:0}
+.ProseMirror .image-resize-handle::after{content:'';position:absolute;right:4px;bottom:4px;width:10px;height:10px;box-sizing:border-box;border:2px solid rgb(var(--primary-6));border-radius:2px;background:var(--color-bg-2)}
+.ProseMirror .editor-image:hover .image-resize-handle,.ProseMirror .editor-image:focus-within .image-resize-handle,.ProseMirror .editor-image.ProseMirror-selectednode .image-resize-handle,.ProseMirror .editor-image.is-resizing .image-resize-handle{opacity:1}
+.ProseMirror .editor-image.is-resizing{user-select:none;outline:2px solid rgb(var(--primary-6));outline-offset:2px}
+.ProseMirror .image-resize-handle:focus-visible{opacity:1;outline:2px solid rgb(var(--primary-6));outline-offset:2px}
+.ProseMirror .image-resize-handle[hidden],.ProseMirror[contenteditable=false] .image-resize-handle{display:none}
+@media(hover:none){.ProseMirror .image-resize-handle{opacity:1}}
+.image-upload{display:inline-flex;align-items:center;flex-wrap:wrap;gap:10px;box-sizing:border-box;width:100%;min-height:72px;padding:12px;margin:12px 0;border:1px solid var(--color-border-2);border-radius:4px;font-size:13px;color:var(--color-text-2);vertical-align:middle}
+.image-upload progress{width:100px;max-width:30%;height:5px;accent-color:rgb(var(--primary-6))}
+.image-upload button{border:0;background:transparent;color:rgb(var(--primary-6));padding:4px;cursor:pointer;font:inherit}
+.image-upload button[hidden]{display:none}
 
 /* Arco 的 .arco-btn-icon-only 虽声明了 flex 居中，但本项目实际加载到的规则里
    没有生效（计算值 display:inline-block / align-items:normal），图标会贴到按钮
@@ -129,6 +143,8 @@ body{overflow:hidden}
 .drawer-navigation .folder-dots{opacity:1}
 .drawer-navigation .sidebar-footer{padding-top:24px}
 .account-form{display:flex;flex-direction:column;gap:12px;padding:8px 0}
+.account-form-field{display:flex;flex-direction:column;gap:8px}
+.account-form-field>label{font-size:14px;line-height:22px;color:var(--color-text-1)}
 .user-avatar{flex:none;background:var(--color-fill-2)}
 .avatar-settings{display:flex;flex-direction:column;gap:18px;padding:8px 0}
 .avatar-preview{display:flex;flex-direction:column;align-items:center;gap:12px}

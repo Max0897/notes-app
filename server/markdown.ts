@@ -2,6 +2,16 @@ import {marked} from 'marked';
 
 type Node = {type: string; text?: string; attrs?: Record<string, any>; content?: Node[]; marks?: {type: string; attrs?: Record<string, any>}[]};
 const paragraph = (content: Node[] = []): Node => ({type: 'paragraph', ...(content.length ? {content} : {})});
+function paragraphBlocks(tokens: any[]): Node[] {
+  const result: Node[] = []; let pending: any[] = [];
+  const flush = () => { if (pending.length) { result.push(paragraph(inline(pending))); pending = []; } };
+  for (const token of tokens) {
+    const id = token.type === 'image' && /^\/api\/images\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/.exec(token.href ?? '')?.[1];
+    if (id) { flush(); result.push({type: 'image', attrs: {imageId: id, src: token.href, alt: (token.text ?? '').slice(0, 200), title: null}}); }
+    else pending.push(token);
+  }
+  flush(); return result.length ? result : [paragraph()];
+}
 function inline(tokens: any[] = [], marks: NonNullable<Node['marks']> = []): Node[] {
   return tokens.flatMap(token => {
     const mark = {strong: 'bold', em: 'italic', del: 'strike', codespan: 'code'}[token.type as string];
@@ -20,7 +30,7 @@ function blocks(tokens: any[]): Node[] {
   return tokens.flatMap(token => {
     if (token.type === 'space' || token.type === 'def' || token.type === 'checkbox') return [];
     if (token.type === 'heading') return [{type: 'heading', attrs: {level: token.depth}, content: inline(token.tokens)}];
-    if (token.type === 'paragraph' || token.type === 'text') return [paragraph(inline(token.tokens ?? [{type: 'text', text: token.text}]))];
+    if (token.type === 'paragraph' || token.type === 'text') return paragraphBlocks(token.tokens ?? [{type: 'text', text: token.text}]);
     if (token.type === 'blockquote') return [{type: 'blockquote', content: blocks(token.tokens)}];
     if (token.type === 'hr') return [{type: 'horizontalRule'}];
     if (token.type === 'code') return [{type: 'codeBlock', ...(token.lang && /^[\w+-]{1,40}$/.test(token.lang) ? {attrs: {language: token.lang}} : {}), ...(token.text ? {content: [{type: 'text', text: token.text}]} : {})}];
@@ -66,6 +76,7 @@ export function markdown(node: Node): string {
   }
   if (node.type === 'hardBreak') return '  \n';
   if (node.type === 'horizontalRule') return '---';
+  if (node.type === 'image') return '![' + escape(node.attrs?.alt ?? '') + '](' + node.attrs?.src + ')';
   if (node.type === 'codeBlock') { const text = plainText(node); const fence = '`'.repeat(Math.max(2, ...(text.match(/`+/g) ?? []).map(run => run.length)) + 1); return fence + (node.attrs?.language ?? '') + '\n' + text + '\n' + fence; }
   if (['bulletList', 'orderedList', 'taskList'].includes(node.type)) return (node.content ?? []).map((item, index) => {
     const prefix = node.type === 'orderedList' ? `${(node.attrs?.start ?? 1) + index}. ` : node.type === 'taskList' ? `- [${item.attrs?.checked ? 'x' : ' '}] ` : '- ';

@@ -15,6 +15,7 @@ type Dependencies = {
   requireLiveSession: (c: AppContext) => void;
   verifyCurrentPassword: (c: AppContext, value: unknown) => Promise<string>;
   validateContent: (value: unknown) => JsonObject;
+  validateImages: (value: unknown, spaceId: string, userId: string, noteId?: string) => void;
   folderName: (value: unknown) => string;
   ApiError: new (status: 400 | 401 | 403 | 404 | 409 | 429, message: string) => Error;
 };
@@ -457,7 +458,7 @@ export function registerCollaboration(app: Hono<AppEnv>, db: Database.Database, 
       if (folder(t, n.folder_id)?.deleted_at) fail(409, '请先恢复所属文件夹');
       const updates: Row = {};
       if ('title' in body) { if (typeof body.title !== 'string' || body.title.length > 200) fail(400, '标题不能超过 200 字'); updates.title = body.title; }
-      if ('content' in body) updates.content = JSON.stringify(validateContent(body.content));
+      if ('content' in body) { updates.content = JSON.stringify(validateContent(body.content)); deps.validateImages(body.content, t.id, uid(c), n.id); }
       if ('plainText' in body) { if (typeof body.plainText !== 'string' || body.plainText.length > 200000) fail(400, '正文过长'); updates.plain_text = body.plainText; }
       if ('pinned' in body) { if (typeof body.pinned !== 'boolean') fail(400, '置顶参数无效'); updates.pinned = Number(body.pinned); }
       if ('folderId' in body) {
