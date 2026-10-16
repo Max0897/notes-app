@@ -1,1 +1,37 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0,minimum-scale=1.0,maximum-scale=1.0,user-scalable=no"><meta name="theme-color" content="#f6f5f1"><link rel="icon" type="image/svg+xml" href="/favicon.svg"><title>备忘录</title></head><body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body></html>
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0,minimum-scale=1.0,maximum-scale=1.0,user-scalable=no">
+    <meta name="theme-color" content="#f6f5f1">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <title>备忘录</title>
+    <style>
+      #app-loading{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;padding:24px;background:#fff;color:#1d2129;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;text-align:center}
+      #app-loading .loading-brand{display:flex;align-items:center;gap:12px;font-size:20px;font-weight:500;line-height:28px}
+      #app-loading .loading-status{display:flex;align-items:center;gap:8px;margin:0;color:#86909c;font-size:13px;line-height:22px}
+      #app-loading .loading-spinner{box-sizing:border-box;width:16px;height:16px;border:2px solid #e8f0ff;border-top-color:#165dff;border-radius:50%;animation:app-loading-spin .8s linear infinite}
+      @keyframes app-loading-spin{to{transform:rotate(360deg)}}
+      @media(prefers-reduced-motion:reduce){#app-loading .loading-spinner{animation:none}}
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div id="app-loading" role="status" aria-live="polite">
+        <div class="loading-brand">
+          <svg width="40" height="40" viewBox="0 0 32 32" aria-hidden="true">
+            <rect width="32" height="32" rx="3" fill="#165dff"/>
+            <path d="M11 7h10a1.6 1.6 0 0 1 1.6 1.6v15.3a.9.9 0 0 1-1.38.77L16 21.5l-5.22 3.17A.9.9 0 0 1 9.4 23.9V8.6A1.6 1.6 0 0 1 11 7z" fill="#fff"/>
+          </svg>
+          <span>备忘录</span>
+        </div>
+        <p class="loading-status"><span class="loading-spinner" aria-hidden="true"></span><span>正在加载…</span></p>
+        <noscript>
+          <style>#app-loading .loading-status{display:none}</style>
+          <p class="loading-status" style="display:block">请启用 JavaScript 后使用备忘录。</p>
+        </noscript>
+      </div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
