@@ -4,15 +4,14 @@ import {RefreshCw} from 'lucide-react';
 import {api, type User} from './api';
 import {UserAvatar} from './UserAvatar';
 import {WorkspacePage} from './WorkspacePage';
-import {StorageDetails} from './StorageUsage';
 
 export function AccountPage({user, onUserChange, onMenu}: {user: User; onUserChange: (user: User) => void; onMenu: () => void}) {
   const {username} = user;
   const [nickname, setNickname] = useState(user.nickname || username);
   const [profileBusy, setProfileBusy] = useState(false);
   const [avatarSeed, setAvatarSeed] = useState(user.avatarSeed);
-  const [avatarBusy, setAvatarBusy] = useState(false);
   const avatarChanged = avatarSeed !== user.avatarSeed;
+  const profileChanged = nickname.trim() !== user.nickname || avatarChanged;
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -26,14 +25,21 @@ export function AccountPage({user, onUserChange, onMenu}: {user: User; onUserCha
     return () => { active = false; };
   }, []);
 
-  async function saveAvatar() {
-    if (avatarBusy || !avatarChanged) return;
-    setAvatarBusy(true);
+  async function saveProfile() {
+    if (profileBusy || busy || !nickname.trim() || !profileChanged) return;
+    setProfileBusy(true);
     try {
-      const data = await api('/auth/avatar', 'PATCH', {avatarStyle: 'cutouts', avatarSeed});
-      onUserChange(data.user); Message.success('头像已保存');
+      if (nickname.trim() !== user.nickname) {
+        const data = await api('/auth/profile', 'PATCH', {nickname});
+        onUserChange(data.user); setNickname(data.user.nickname);
+      }
+      if (avatarChanged) {
+        const data = await api('/auth/avatar', 'PATCH', {avatarStyle: 'cutouts', avatarSeed});
+        onUserChange(data.user);
+      }
+      Message.success('个人资料已保存');
     } catch (error) { Message.error((error as Error).message); }
-    finally { setAvatarBusy(false); }
+    finally { setProfileBusy(false); }
   }
 
   async function submit(changePassword: boolean) {
@@ -55,14 +61,16 @@ export function AccountPage({user, onUserChange, onMenu}: {user: User; onUserCha
   }
 
   return <WorkspacePage title="账号设置" onMenu={onMenu}>
-    <Typography.Paragraph>当前账号：<Typography.Text bold>{username}</Typography.Text></Typography.Paragraph>
     <Tabs className="settings-tabs" defaultActiveTab="profile" overflow="scroll">
-      <Tabs.TabPane key="profile" title="个人资料">
-        <form className="account-form" onSubmit={async event => {
-          event.preventDefault(); setProfileBusy(true);
-          try { const data = await api('/auth/profile', 'PATCH', {nickname}); onUserChange(data.user); setNickname(data.user.nickname); Message.success('昵称已保存'); }
-          catch (error) { Message.error((error as Error).message); } finally { setProfileBusy(false); }
-        }}>
+      <Tabs.TabPane key="profile" title="个人资料" disabled={busy}>
+        <form className="account-form" onSubmit={event => { event.preventDefault(); void saveProfile(); }}>
+          <div className="account-form-field" role="group" aria-labelledby="profile-avatar-label">
+            <span className="account-form-label" id="profile-avatar-label">头像</span>
+            <div className="avatar-settings">
+              <UserAvatar user={{...user, avatarSeed}} size={72} label="头像预览"/>
+              <Button htmlType="button" icon={<RefreshCw size={16}/>} disabled={profileBusy} onClick={() => setAvatarSeed(crypto.randomUUID())}>换一个</Button>
+            </div>
+          </div>
           <div className="account-form-field">
             <label htmlFor="profile-username">登录用户名</label>
             <Input id="profile-username" value={username} readOnly aria-label="登录用户名" placeholder="登录用户名"/>
@@ -72,20 +80,10 @@ export function AccountPage({user, onUserChange, onMenu}: {user: User; onUserCha
             <Input id="profile-nickname" value={nickname} onChange={setNickname} maxLength={64} aria-label="昵称" placeholder="昵称（1–32 个字符）" disabled={profileBusy}/>
           </div>
           <Typography.Text type="secondary">昵称用于协作光标、在线状态和成员列表；登录及邀请仍使用用户名。</Typography.Text>
-          <Button type="primary" htmlType="submit" loading={profileBusy} disabled={!nickname.trim() || nickname.trim() === user.nickname}>保存资料</Button>
+          <Button type="primary" htmlType="submit" loading={profileBusy} disabled={!nickname.trim() || !profileChanged}>保存资料</Button>
         </form>
-        <StorageDetails userId={user.id}/>
       </Tabs.TabPane>
-      <Tabs.TabPane key="avatar" title="头像" disabled={busy}>
-        <div className="avatar-settings">
-          <div className="avatar-preview"><UserAvatar user={{...user, avatarSeed}} size={96} label="头像预览"/></div>
-          <div className="avatar-actions">
-            <Button icon={<RefreshCw size={16}/>} disabled={avatarBusy} onClick={() => setAvatarSeed(crypto.randomUUID())}>换一个</Button>
-            <Button type="primary" disabled={!avatarChanged || avatarBusy} loading={avatarBusy} onClick={() => void saveAvatar()}>保存头像</Button>
-          </div>
-        </div>
-      </Tabs.TabPane>
-      <Tabs.TabPane key="security" title="账号安全" disabled={avatarBusy || busy}>
+      <Tabs.TabPane key="security" title="账号安全" disabled={profileBusy || busy}>
         <form className="account-form" onSubmit={event => { event.preventDefault(); void submit(true); }}>
           <Input.Password id="current-password" aria-label="当前密码" autoComplete="current-password" placeholder="请输入当前密码"
             value={currentPassword} onChange={setCurrentPassword} maxLength={128} disabled={busy}/>
@@ -97,7 +95,7 @@ export function AccountPage({user, onUserChange, onMenu}: {user: User; onUserCha
           <Button type="primary" htmlType="submit" loading={busy}>更新密码</Button>
         </form>
       </Tabs.TabPane>
-      <Tabs.TabPane key="sessions" title="登录会话" disabled={avatarBusy || busy}>
+      <Tabs.TabPane key="sessions" title="登录会话" disabled={profileBusy || busy}>
         <Typography.Paragraph>{sessions === null ? '正在读取登录状态…' : `其他登录会话：${sessions} 个`}</Typography.Paragraph>
         <Typography.Paragraph type="secondary">验证当前密码后，可退出其他设备，本设备保持登录。</Typography.Paragraph>
         <form className="account-form" onSubmit={event => { event.preventDefault(); void submit(false); }}>

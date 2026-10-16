@@ -6,8 +6,8 @@ function CapacityBar({used, limit, label}: {used: number; limit: number; label: 
     <span style={{width: Math.max(0, Math.min(100, percent)) + '%'}}/>
   </div>;
 }
-export function SidebarStorage({data, error, team, disabled, onClick}: {data: StorageUsage | null; error: boolean; team: boolean; disabled?: boolean; onClick: () => void}) {
-  return <button type="button" className="sidebar-storage" aria-label={'查看' + (team ? '团队' : '个人') + '存储空间'} disabled={disabled} onClick={onClick}>
+export function SidebarStorage({data, error, team, active, disabled, onClick}: {data: StorageUsage | null; error: boolean; team: boolean; active?: boolean; disabled?: boolean; onClick: () => void}) {
+  return <button type="button" className="sidebar-storage" aria-label={'查看' + (team ? '团队' : '个人') + '存储空间'} aria-current={active ? 'page' : undefined} disabled={disabled} onClick={onClick}>
     <span className="capacity-summary"><span>存储空间</span><span>{data ? formatBytes(data.usedBytes) + ' / ' + formatBytes(data.limitBytes) : error ? '用量暂不可用' : '读取中…'}</span></span>
     {data ? <CapacityBar used={data.usedBytes} limit={data.limitBytes} label={(team ? '团队' : '个人') + '存储用量'}/> : <span className="capacity-track"/>}
   </button>;

@@ -15,12 +15,13 @@ import {isValidNewUsername, USERNAME_PATTERN, USERNAME_RULE} from '../server/use
 
 const {Text, Title, Paragraph} = Typography;
 const AccountPage = lazy(() => import('./AccountPage').then(module => ({default: module.AccountPage})));
+const StoragePage = lazy(() => import('./StoragePage').then(module => ({default: module.StoragePage})));
 const CreateTeamDialog = lazy(() => import('./TeamViews').then(module => ({default: module.CreateTeamDialog})));
 const InvitationsPage = lazy(() => import('./TeamViews').then(module => ({default: module.InvitationsPage})));
 const TeamSettingsPage = lazy(() => import('./TeamViews').then(module => ({default: module.TeamSettingsPage})));
 const NotificationsPage = lazy(() => import('./NotificationsPage').then(module => ({default: module.NotificationsPage})));
 const NoteActivity = lazy(() => import('./NoteActivity').then(module => ({default: module.NoteActivity})));
-const pageTitles = {notifications: '通知中心', invitations: '团队邀请', settings: '团队设置', account: '账号设置'};
+const pageTitles = {notifications: '通知中心', invitations: '团队邀请', settings: '团队设置', account: '账号设置', storage: '存储空间'};
 const date = (value: string) => new Date(value).toLocaleDateString('zh-CN', {month: 'short', day: 'numeric'});
 const Ico = ({Icon, text}: {Icon: typeof FolderIcon; text: string}) => <span className="ico-label"><Icon size={16}/><span>{text}</span></span>;
 function folderMoveMenu(folders: Folder[], currentFolderId: string | null | undefined, disabled = false) {
@@ -435,7 +436,7 @@ export function App() {
       {currentTeam && <Button className="sidebar-action" type="text" long disabled={batchBusy} aria-current={view === 'settings' ? 'page' : undefined} onClick={() => openPage('settings')}><Settings size={17}/><span>团队设置</span></Button>}
       <Button className="sidebar-action" type="text" long disabled={batchBusy} aria-current={view === 'invitations' ? 'page' : undefined} onClick={() => openPage('invitations')}><Mail size={17}/><span>团队邀请</span></Button>
       <Button className="sidebar-action" type="text" long disabled={batchBusy} aria-current={view === 'notifications' ? 'page' : undefined} onClick={() => openPage('notifications')}><Bell size={17}/><span>通知中心</span><Badge count={unreadCount} maxCount={99}/></Button>
-      <SidebarStorage data={storage.data} error={storage.error} team={!!teamId} disabled={batchBusy} onClick={() => openPage(teamId ? 'settings' : 'account')}/>
+      <SidebarStorage data={storage.data} error={storage.error} team={!!teamId} active={view === 'storage'} disabled={batchBusy} onClick={() => openPage('storage')}/>
       <AccountMenu user={user} disabled={batchBusy} onSettings={() => openPage('account')} onLogout={() => void logout()}/>
     </div>
   </>;
@@ -458,6 +459,7 @@ export function App() {
       {view === 'notifications' && <NotificationsPage unreadCount={unreadCount} onUnreadChange={setUnreadCount} onMenu={() => setDrawerOpen(true)} onOpenNote={openNotificationNote} onInvitations={() => openPage('invitations')}/>}
       {view === 'invitations' && <InvitationsPage token={inviteToken} teams={teams} onMenu={() => setDrawerOpen(true)} onLinkHandled={clearInviteToken} onChanged={async () => { await loadSpaces(); }}/>}
       {view === 'account' && <AccountPage user={user} onUserChange={updated => setUser(previous => previous?.id === updated.id ? updated : previous)} onMenu={() => setDrawerOpen(true)}/>}
+      {view === 'storage' && <StoragePage user={user} team={currentTeam} onMenu={() => setDrawerOpen(true)}/>}
       {view === 'settings' && currentTeam && <TeamSettingsPage key={currentTeam.id} team={currentTeam} user={user} onMenu={() => setDrawerOpen(true)} onChanged={teamChanged} onLeave={teamLeft}/>}
     </Suspense> : <><section className="note-list">
       <div className="note-list-head">

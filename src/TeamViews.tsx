@@ -5,7 +5,6 @@ import {api, teamApi, isManager, roleNames, type Team, type TeamRole, type Folde
 import {UserAvatar} from './UserAvatar';
 import {WorkspacePage} from './WorkspacePage';
 import {ListRow} from './ListRow';
-import {StorageDetails} from './StorageUsage';
 const {Text} = Typography;
 const errorMessage = (error: unknown) => Message.error((error as Error).message);
 const date = (value: string | number) => new Date(value).toLocaleString('zh-CN');
@@ -110,7 +109,6 @@ export function TeamSettingsPage({team, user, onMenu, onChanged, onLeave}: {team
             <Input.TextArea aria-label="团队简介" placeholder="团队简介（最多 200 字）" maxLength={200} value={description} onChange={setDescription} disabled={!manage || busy}/>
             {manage && <Button type="primary" htmlType="submit" loading={busy}>保存团队信息</Button>}
           </form>
-          <StorageDetails userId={user.id} teamId={team.id}/>
           {team.role === 'owner' ? <div className="team-entry">
             <Button status="danger" disabled={busy} onClick={() => setDissolve(true)}>解散团队</Button>
           </div> : <div className="team-entry"><Button status="danger" disabled={busy} onClick={() => Modal.confirm({title: '退出团队？', content: '退出后无法继续访问团队资料，你创建的团队资料会保留。', onOk: async () => { if (!await run(async () => { await teamApi(team.id, '/leave', 'POST'); await onLeave(); })) throw new Error('操作失败'); }})}>退出团队</Button></div>}
