@@ -5,7 +5,7 @@ import {api, type User} from './api';
 import {UserAvatar} from './UserAvatar';
 import {WorkspacePage} from './WorkspacePage';
 
-export function AccountPage({user, onUserChange, onMenu}: {user: User; onUserChange: (user: User) => void; onMenu: () => void}) {
+export function AccountPage({user, onUserChange, onMenu, tab, onTabChange}: {user: User; onUserChange: (user: User) => void; onMenu: () => void; tab?: string; onTabChange?: (tab: string) => void}) {
   const {username} = user;
   const [nickname, setNickname] = useState(user.nickname || username);
   const [profileBusy, setProfileBusy] = useState(false);
@@ -61,7 +61,7 @@ export function AccountPage({user, onUserChange, onMenu}: {user: User; onUserCha
   }
 
   return <WorkspacePage title="账号设置" onMenu={onMenu}>
-    <Tabs className="settings-tabs" defaultActiveTab="profile" overflow="scroll">
+    <Tabs className="settings-tabs" defaultActiveTab="profile" activeTab={tab} onChange={onTabChange} overflow="scroll">
       <Tabs.TabPane key="profile" title="个人资料" disabled={busy}>
         <form className="account-form" onSubmit={event => { event.preventDefault(); void saveProfile(); }}>
           <div className="account-form-field" role="group" aria-labelledby="profile-avatar-label">

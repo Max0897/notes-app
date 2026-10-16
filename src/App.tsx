@@ -1,4 +1,5 @@
 import {lazy, Suspense, useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent} from 'react';
+import {Outlet, useLocation, useMatches, useNavigate, useParams} from 'react-router-dom';
 import {Badge, Button, Card, Checkbox, Drawer, Dropdown, Empty, Input, List, Menu, Message, Modal, Select, Space, Spin, Tag, Tooltip, Typography} from '@arco-design/web-react';
 import {ArrowLeft, Bell, BookOpen, Check, CheckSquare, Edit3, FileCode2, FileText, Folder as FolderIcon, Mail, Menu as MenuIcon, MoreHorizontal, Pencil, Plus, RotateCcw, Search, Settings, Star, Trash2, History, Link as LinkIcon, MessageSquare, Upload} from 'lucide-react';
 import {api, ApiError, isManager, type AppNotification, type Team, type EditorBridge, type Folder, type Note, type User} from './api';
@@ -12,6 +13,7 @@ import {Highlight} from './Highlight';
 import {SidebarStorage} from './StorageUsage';
 import {useStorageUsage} from './storage';
 import {isValidNewUsername, USERNAME_PATTERN, USERNAME_RULE} from '../server/username';
+import {invitationToken, linkedNote, notesPath, pagePath, pageTitles, useEditorNavigationGuard, workspaceTeam, type SettingsPage, type WorkspaceView} from './navigation';
 
 const {Text, Title, Paragraph} = Typography;
 const AccountPage = lazy(() => import('./AccountPage').then(module => ({default: module.AccountPage})));
@@ -21,7 +23,6 @@ const InvitationsPage = lazy(() => import('./TeamViews').then(module => ({defaul
 const TeamSettingsPage = lazy(() => import('./TeamViews').then(module => ({default: module.TeamSettingsPage})));
 const NotificationsPage = lazy(() => import('./NotificationsPage').then(module => ({default: module.NotificationsPage})));
 const NoteActivity = lazy(() => import('./NoteActivity').then(module => ({default: module.NoteActivity})));
-const pageTitles = {notifications: '通知中心', invitations: '团队邀请', settings: '团队设置', account: '账号设置', storage: '存储空间'};
 const date = (value: string) => new Date(value).toLocaleDateString('zh-CN', {month: 'short', day: 'numeric'});
 const Ico = ({Icon, text}: {Icon: typeof FolderIcon; text: string}) => <span className="ico-label"><Icon size={16}/><span>{text}</span></span>;
 function folderMoveMenu(folders: Folder[], currentFolderId: string | null | undefined, disabled = false) {
@@ -37,6 +38,11 @@ function folderMoveMenu(folders: Folder[], currentFolderId: string | null | unde
 }
 
 export function App() {
+  const navigate = useNavigate(), routeLocation = useLocation(), params = useParams();
+  const matches = useMatches();
+  const view = (matches.at(-1)?.handle as {page: WorkspaceView} | undefined)?.page ?? 'notes';
+  const routeTeamId = workspaceTeam(routeLocation.search, routeLocation.hash, params.teamId);
+  const routeKey = useRef(routeLocation.key); routeKey.current = routeLocation.key;
   const [user, setUser] = useState<User | null>(null);
   const [boot, setBoot] = useState(true), [authMode, setAuthMode] = useState(false);
   const [nickname, setNickname] = useState('');
@@ -46,16 +52,17 @@ export function App() {
   const [dateFilter, setDateFilter] = useState<DateFilter>('all'), [searchIndex, setSearchIndex] = useState(-1);
   const [activity, setActivity] = useState<'history' | 'comments' | null>(null);
   const importInput = useRef<HTMLInputElement>(null);
-  const linkedHandler = useRef<() => void>();
   const linkRequest = useRef(0);
   const [selected, setSelected] = useState<string | null>(null), [mobile, setMobile] = useState(false);
   const [loading, setLoading] = useState(true), [drawerOpen, setDrawerOpen] = useState(false);
   const [folderDialog, setFolderDialog] = useState<{mode: 'create' | 'rename'; id?: string; name: string} | null>(null);
   const [moreOpen, setMoreOpen] = useState(false), [checked, setChecked] = useState<string[]>([]), [batchBusy, setBatchBusy] = useState(false);
-  const [teamId, setTeamId] = useState<string | null>(null), [teams, setTeams] = useState<Team[]>([]);
+  const [teamId, setTeamId] = useState<string | null>(routeTeamId), [teams, setTeams] = useState<Team[]>([]);
+  const [spacesLoaded, setSpacesLoaded] = useState(false);
+  const [spacesError, setSpacesError] = useState('');
   const [createTeamOpen, setCreateTeamOpen] = useState(false);
   const [inviteToken, setInviteToken] = useState<string | null>(null), [draft, setDraft] = useState('');
-  const [view, setView] = useState<'notes' | keyof typeof pageTitles>('notes'), [unreadCount, setUnreadCount] = useState(0);
+  const [unreadCount, setUnreadCount] = useState(0);
   const currentTeam = teams.find(t => t.id === teamId && !t.deletedAt);
   const manageFolders = !teamId || isManager(currentTeam);
   const canCreate = !teamId || !!currentTeam && currentTeam.role !== 'viewer' && (!folders.some(f => f.id === scope) || !!folders.find(f => f.id === scope && f.canEdit && !f.deletedAt));
@@ -65,19 +72,37 @@ export function App() {
   const [contextNoteId, setContextNoteId] = useState<string | null>(null);
   const mutationLock = useRef(false);
   const editorRef = useRef<EditorBridge | null>(null);
+  const navigationBypass = useRef(false);
+  useEditorNavigationGuard(editorRef, batchBusy, navigationBypass);
   const shortcutHandler = useRef<(event: KeyboardEvent) => void>();
   const current = notes.find(note => note.id === selected);
   const userId = user?.id;
   const storage = useStorageUsage(userId, teamId);
 
   const workspaceApi = (path: string, method = 'GET', body?: any) => api((teamId ? '/teams/' + teamId : '') + path, method, body);
-  async function loadSpaces() { const data = await api('/spaces'); setTeams(data.teams); return data.teams as Team[]; }
+  async function loadSpaces() {
+    setSpacesError('');
+    try { const data = await api('/spaces'); setTeams(data.teams); setSpacesLoaded(true); return data.teams as Team[]; }
+    catch (error) { setSpacesError((error as Error).message); throw error; }
+  }
   function preserveDraft() { if (editorRef.current?.hasChanges()) setDraft(editorRef.current.draft()); }
-  function resetWorkspace(id: string | null) { setActivity(null); setDateFilter('all'); setTeamId(id); setNotes([]); setFolders([]); setSelected(null); setScope('all'); setSearch(''); setMobile(false); setDrawerOpen(false); setCreateTeamOpen(false); setView('notes'); resetSelection(); setLoading(true); }
-  async function switchWorkspace(id: string | null) { if (id !== teamId || view !== 'notes') await safeSwitch(() => { if (id !== teamId) resetWorkspace(id); setView('notes'); }); }
+  function resetWorkspaceState(id: string | null) { setActivity(null); setDateFilter('all'); setTeamId(id); setNotes([]); setFolders([]); setSelected(null); setScope('all'); setSearch(''); setMobile(false); setDrawerOpen(false); setCreateTeamOpen(false); resetSelection(); setLoading(true); }
+  function resetWorkspace(id: string | null, force = false) {
+    resetWorkspaceState(id);
+    navigationBypass.current = force;
+    void navigate(notesPath(id), {replace: force});
+    navigationBypass.current = false;
+  }
+  function selectNote(id: string | null, replace = false) {
+    setSelected(id);
+    navigationBypass.current = replace;
+    void navigate(notesPath(teamId, id), {replace});
+    navigationBypass.current = false;
+  }
+  async function switchWorkspace(id: string | null) { if (id !== teamId || view !== 'notes') await safeSwitch(() => { if (id !== teamId) resetWorkspace(id); else void navigate(notesPath(id, selected)); }); }
   async function teamChanged() { await loadSpaces(); if (teamId) await reload(); }
   async function teamLeft() { preserveDraft(); resetWorkspace(null); await loadSpaces(); }
-  function clearInviteToken() { setInviteToken(null); if (location.hash.startsWith('#invite=')) history.replaceState(null, '', location.pathname + location.search); }
+  function clearInviteToken() { setInviteToken(null); void navigate({pathname: routeLocation.pathname, search: routeLocation.search, hash: ''}, {replace: true}); }
   function upsert(note: Note) { if (workspace.current !== teamId) return; setNotes(previous => previous.some(item => item.id === note.id) ? previous.map(item => item.id === note.id ? note : item) : [note, ...previous]); }
   async function reload() {
     setLoading(true);
@@ -97,7 +122,22 @@ export function App() {
     window.addEventListener('focus', refresh); window.addEventListener('notifications:refresh', changed);
     return () => { active = false; clearInterval(timer); clearTimeout(pending); window.removeEventListener('focus', refresh); window.removeEventListener('notifications:refresh', changed); };
   }, [userId]);
-  useEffect(() => { if (userId) { void loadSpaces().catch(error => Message.error(error.message)); const token = location.hash.match(/^#invite=([\w-]{43})$/)?.[1]; if (token) { setInviteToken(token); setView('invitations'); } } }, [userId]);
+  useEffect(() => { if (userId) void loadSpaces().catch(error => Message.error(error.message)); }, [userId]);
+  useEffect(() => {
+    if (!userId) return;
+    if (teamId !== routeTeamId) resetWorkspaceState(routeTeamId);
+    setDrawerOpen(false); resetSelection();
+    if (view !== 'notes') setMobile(false);
+  }, [userId, routeTeamId, routeLocation.pathname]);
+  useEffect(() => {
+    if (!userId || !spacesLoaded || !routeTeamId || teams.some(team => team.id === routeTeamId && !team.deletedAt)) return;
+    preserveDraft(); resetWorkspace(null, true); Message.warning('团队不存在或已没有访问权限，已返回个人空间');
+  }, [userId, spacesLoaded, routeTeamId, teams]);
+  useEffect(() => {
+    if (view === 'settings' && currentTeam && !isManager(currentTeam) && params.tab && !['info', 'members'].includes(params.tab)) {
+      void navigate(pagePath('settings', currentTeam.id), {replace: true});
+    }
+  }, [view, currentTeam, params.tab, navigate]);
   useEffect(() => {
     if (!userId) return;
     setLoading(true);
@@ -119,11 +159,11 @@ export function App() {
       if (workspace.current !== id) return;
       if (!c.teams.some((t: Team) => t.id === id && !t.deletedAt)) { revokedHandler.current?.(); return; }
       const fresh = a.notes.find((n: Note) => n.id === selected);
-      if (selected && (!fresh || (current?.canEdit && !fresh.canEdit))) { preserveDraft(); setSelected(null); setMobile(false); resetSelection(); }
+      if (selected && (!fresh || (current?.canEdit && !fresh.canEdit))) { preserveDraft(); selectNote(null, true); setMobile(false); resetSelection(); }
       setNotes(a.notes); setFolders(b.folders); setTeams(c.teams);
     }).catch(error => { if (workspace.current === id && error instanceof ApiError && [401, 403, 404].includes(error.status)) revokedHandler.current?.(); });
   };
-  revokedHandler.current = () => { preserveDraft(); resetWorkspace(null); void loadSpaces().catch(() => {}); Message.warning('团队访问权限已变化，已返回个人空间'); };
+  revokedHandler.current = () => { preserveDraft(); resetWorkspace(null, true); void loadSpaces().catch(() => {}); Message.warning('团队访问权限已变化，已返回个人空间'); };
   connectionErrorHandler.current = () => {
     const id = teamId;
     if (!id) return;
@@ -155,41 +195,39 @@ export function App() {
   }
   function resetSelection() { setChecked([]); setMoreOpen(false); setContextNoteId(null); }
   function switchScope(key: string) {
-    void safeSwitch(() => { setView('notes'); setScope(key); setMobile(false); setDrawerOpen(false); resetSelection(); });
+    void safeSwitch(() => { void navigate(notesPath(teamId, selected)); setScope(key); setMobile(false); setDrawerOpen(false); resetSelection(); });
   }
-  function openPage(page: keyof typeof pageTitles) { void safeSwitch(() => { setView(page); setMobile(false); setDrawerOpen(false); resetSelection(); }); }
-  async function openNotificationNote(notification: Pick<AppNotification, 'noteId' | 'teamId'> & {kind?: string}) {
+  function openPage(page: SettingsPage) { void safeSwitch(() => { void navigate(pagePath(page, teamId)); setMobile(false); setDrawerOpen(false); resetSelection(); }); }
+  async function openNotificationNote(notification: Pick<AppNotification, 'noteId' | 'teamId'> & {kind?: string}, replace = false) {
     await safeSwitch(async () => {
       try {
         const prefix = notification.teamId ? '/teams/' + notification.teamId : '';
-        const request = ++linkRequest.current;
+        const request = ++linkRequest.current, sourceKey = routeLocation.key, sourceAddress = window.location.href;
         const [a, b, c, target] = await Promise.all([api(prefix + '/notes'), api(prefix + '/folders'), api('/spaces'), api(prefix + '/notes/' + notification.noteId)]);
-        if (request !== linkRequest.current) return;
+        if (request !== linkRequest.current || sourceKey !== routeKey.current || sourceAddress !== window.location.href) return;
         const note = target.note as Note;
         if (!note) { Message.info('备忘录已不存在或你已没有访问权限'); return; }
-        resetWorkspace(notification.teamId); setNotes(a.notes); setFolders(b.folders); setTeams(c.teams);
-        setActivity((notification.kind === 'note_mention' || notification.kind === 'note_comment_reply') ? 'comments' : null); setScope(note.deletedAt ? 'trash' : 'all'); setSelected(note.id); setView('notes'); setMobile(true); setLoading(false);
+        resetWorkspaceState(notification.teamId); setNotes(a.notes); setFolders(b.folders); setTeams(c.teams); setSpacesLoaded(true);
+        setActivity((notification.kind === 'note_mention' || notification.kind === 'note_comment_reply') ? 'comments' : null); setScope(note.deletedAt ? 'trash' : 'all'); setSelected(note.id); setMobile(true); setLoading(false);
+        void navigate(notesPath(notification.teamId, note.id), {replace});
       } catch (error) { Message.error((error as Error).message); }
     });
   }
-  linkedHandler.current = () => {
-    const params = new URLSearchParams(location.hash.slice(1)), noteId = params.get('note'), linkedTeam = params.get('team');
-    const valid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-    if (noteId && valid(noteId) && (!linkedTeam || valid(linkedTeam))) void openNotificationNote({noteId, teamId: linkedTeam});
-  };
   useEffect(() => {
-    if (!userId) return; linkedHandler.current?.();
-    const handler = () => linkedHandler.current?.(); window.addEventListener('hashchange', handler);
-    return () => window.removeEventListener('hashchange', handler);
-  }, [userId]);
-  useEffect(() => {
-    if (userId && selected && view === 'notes') {
-      const params = new URLSearchParams({note: selected}); if (teamId) params.set('team', teamId);
-      history.replaceState(null, '', location.pathname + location.search + '#' + params);
+    if (!userId) return;
+    const token = invitationToken(routeLocation.hash), note = linkedNote(routeLocation.hash);
+    if (token) {
+      setInviteToken(token);
+      if (view !== 'invitations') void navigate(pagePath('invitations', routeTeamId) + routeLocation.hash, {replace: true});
+    } else {
+      setInviteToken(null);
+      if (note && (note.noteId !== selected || note.teamId !== teamId || view !== 'notes')) void openNotificationNote(note, true);
+      else if (note && view === 'notes') setMobile(true);
+      else if (!routeLocation.hash && view === 'notes') { setSelected(null); setActivity(null); setMobile(false); }
     }
-  }, [userId, selected, teamId, view]);
+  }, [userId, routeLocation.key]);
   async function copyNoteLink(note: Note) {
-    const url = new URL(location.href), params = new URLSearchParams({note: note.id}); if (teamId) params.set('team', teamId); url.hash = params.toString();
+    const url = new URL(notesPath(teamId, note.id), window.location.origin);
     try { await navigator.clipboard.writeText(url.href); Message.success('链接已复制，打开时仍需具备访问权限'); } catch { Message.error('复制失败，请复制浏览器地址栏中的链接'); }
   }
   async function exportNotes(ids: string[], format: 'markdown' | 'text') {
@@ -208,7 +246,7 @@ export function App() {
         const body = {files: await Promise.all(list.map(async file => ({name: file.name, text: await file.text()}))), folderId: activeFolders.some(folder => folder.id === scope) ? scope : null};
         if (new TextEncoder().encode(JSON.stringify(body)).length > 1000000) throw new Error('本次导入内容过大，请分批导入');
         const data = await workspaceApi('/notes/import', 'POST', body);
-        setNotes(previous => [...data.notes, ...previous]); setScope(body.folderId ?? 'all'); setSelected(data.notes[0].id); setMobile(true); setSearch(''); resetSelection(); Message.success('已导入 ' + data.notes.length + ' 篇备忘录');
+        setNotes(previous => [...data.notes, ...previous]); setScope(body.folderId ?? 'all'); selectNote(data.notes[0].id, true); setMobile(true); setSearch(''); resetSelection(); Message.success('已导入 ' + data.notes.length + ' 篇备忘录');
       } catch (error) { Message.error((error as Error).message); } finally { setBatchBusy(false); }
     });
   }
@@ -217,7 +255,7 @@ export function App() {
       try {
         const folderId = folder?.id ?? (folders.some(item => item.id === scope) ? scope : null);
         const data = await workspaceApi('/notes', 'POST', {folderId});
-        upsert(data.note); setActivity(null); setSelected(data.note.id); setView('notes');
+        upsert(data.note); setActivity(null); selectNote(data.note.id);
         if (folder) setScope(folder.id); else if (scope === 'trash' || scope === 'pinned') setScope('all');
         setSearch(''); setMobile(true); setDrawerOpen(false); resetSelection();
       } catch (error) { Message.error((error as Error).message); }
@@ -236,7 +274,7 @@ export function App() {
       const latest = saved?.id === noteId ? saved : note;
       const data = await workspaceApi('/notes/' + noteId, 'PATCH', {version: latest.version, ...patch});
       upsert(data.note); setChecked(previous => previous.filter(id => id !== noteId));
-      if (data.note.deletedAt && selected === noteId) { setSelected(null); setMobile(false); }
+      if (data.note.deletedAt && selected === noteId) { selectNote(null, true); setMobile(false); }
     }
     catch (error) {
       if (error instanceof ApiError && error.data.note) upsert(error.data.note);
@@ -268,7 +306,7 @@ export function App() {
   function permaDelete() {
     if (!current) return;
     Modal.confirm({title: '永久删除这篇笔记？', content: '此操作无法撤销，笔记内容将无法恢复。', onOk: async () => {
-      try { await workspaceApi('/notes/' + current.id, 'DELETE'); setNotes(items => items.filter(item => item.id !== current.id)); setSelected(null); setMobile(false); }
+      try { await workspaceApi('/notes/' + current.id, 'DELETE'); setNotes(items => items.filter(item => item.id !== current.id)); selectNote(null, true); setMobile(false); }
       catch (error) { Message.error((error as Error).message); throw error; }
     }});
   }
@@ -276,7 +314,8 @@ export function App() {
     await safeSwitch(async () => {
       try {
         await api('/auth/logout', 'POST'); setUser(null); setTeamId(null); setTeams([]); setCreateTeamOpen(false); setNotes([]); setFolders([]); setSelected(null);
-        setScope('all'); setSearch(''); setDrawerOpen(false); setMobile(false); setView('notes'); setUnreadCount(0); resetSelection();
+        setScope('all'); setSearch(''); setDrawerOpen(false); setMobile(false); setUnreadCount(0); setSpacesLoaded(false); resetSelection();
+        void navigate('/notes', {replace: true});
       } catch (error) { Message.error((error as Error).message); }
     });
   }
@@ -338,7 +377,7 @@ export function App() {
       const data = await workspaceApi('/notes/batch', 'POST', {operation, notes: items, ...(operation === 'move' ? {folderId} : {})});
       const updated = new Map<string, Note>(data.notes.map((note: Note) => [note.id, note]));
       setNotes(previous => previous.map(note => updated.get(note.id) ?? note));
-      if (selected && updated.has(selected) && operation !== 'move') { setSelected(null); setMobile(false); }
+      if (selected && updated.has(selected) && operation !== 'move') { selectNote(null, true); setMobile(false); }
       resetSelection();
       Message.success(`已${operation === 'move' ? '移动' : operation === 'trash' ? '移到最近删除' : '恢复'} ${items.length} 篇笔记`);
     } catch (error) {
@@ -382,7 +421,7 @@ export function App() {
     } else if (modifier && key === 'k' && !event.isComposing && !createTeamOpen && !folderDialog) {
       event.preventDefault();
       void safeSwitch(() => {
-        setView('notes'); setMobile(false); setDrawerOpen(false);
+        void navigate(notesPath(teamId, selected)); setMobile(false); setDrawerOpen(false);
         requestAnimationFrame(() => document.querySelector<HTMLInputElement>('.note-search input')?.focus());
       });
     } else if (event.key === 'Escape' && activity) { setActivity(null); event.preventDefault();
@@ -418,6 +457,10 @@ export function App() {
     <div className="auth-switch"><Text type="secondary">{authMode ? '已有账号？' : '还没有账号？'}</Text><Button type="text" size="small" onClick={() => setAuthMode(!authMode)}>{authMode ? '去登录' : '创建账号'}</Button></div>
   </Card></div>;
 
+  if (teamId !== routeTeamId || routeTeamId && (!spacesLoaded || !currentTeam)) return <div className="boot">{spacesError
+    ? <Space direction="vertical" align="center"><Text type="error">{spacesError}</Text><Button onClick={() => void loadSpaces().catch(error => Message.error(error.message))}>重试</Button></Space>
+    : <Spin tip="正在加载团队空间"/>}</div>;
+
   const navigation = <>
     <SpaceSwitcher teamId={teamId} teams={teams} disabled={batchBusy} onSwitch={id => void switchWorkspace(id)} onCreate={() => void safeSwitch(() => { setDrawerOpen(false); setCreateTeamOpen(true); })}/>
     <Menu selectedKeys={view === 'notes' ? [scope] : []} onClickMenuItem={key => switchScope(String(key))}>
@@ -447,7 +490,7 @@ export function App() {
   function openNote(note: Note) {
     if (batchBusy) return;
     setContextNoteId(null);
-    void safeSwitch(() => { setActivity(null); setSelected(note.id); setMobile(true); });
+    void safeSwitch(() => { setActivity(null); selectNote(note.id); setMobile(true); });
   }
 
   return <div className={'app-shell' + (mobile ? ' mobile-edit' : '')}>
@@ -455,13 +498,14 @@ export function App() {
     <Drawer title="备忘录" placement="left" width="min(300px, 88vw)" visible={drawerOpen} onCancel={() => setDrawerOpen(false)} footer={null} unmountOnExit>
       <nav className="drawer-navigation" aria-label="文件夹与账号">{navigation}</nav>
     </Drawer>
-    {view !== 'notes' ? <Suspense fallback={<WorkspacePage title={pageTitles[view]} onMenu={() => setDrawerOpen(true)}><Spin tip="正在加载"/></WorkspacePage>}>
-      {view === 'notifications' && <NotificationsPage unreadCount={unreadCount} onUnreadChange={setUnreadCount} onMenu={() => setDrawerOpen(true)} onOpenNote={openNotificationNote} onInvitations={() => openPage('invitations')}/>}
-      {view === 'invitations' && <InvitationsPage token={inviteToken} teams={teams} onMenu={() => setDrawerOpen(true)} onLinkHandled={clearInviteToken} onChanged={async () => { await loadSpaces(); }}/>}
-      {view === 'account' && <AccountPage user={user} onUserChange={updated => setUser(previous => previous?.id === updated.id ? updated : previous)} onMenu={() => setDrawerOpen(true)}/>}
-      {view === 'storage' && <StoragePage user={user} team={currentTeam} onMenu={() => setDrawerOpen(true)}/>}
-      {view === 'settings' && currentTeam && <TeamSettingsPage key={currentTeam.id} team={currentTeam} user={user} onMenu={() => setDrawerOpen(true)} onChanged={teamChanged} onLeave={teamLeft}/>}
-    </Suspense> : <><section className="note-list">
+    <Suspense fallback={<WorkspacePage title={view === 'notes' ? '备忘录' : pageTitles[view]} onMenu={() => setDrawerOpen(true)}><Spin tip="正在加载"/></WorkspacePage>}>
+    <Outlet context={{
+      notifications: <NotificationsPage unreadCount={unreadCount} onUnreadChange={setUnreadCount} onMenu={() => setDrawerOpen(true)} onOpenNote={openNotificationNote} onInvitations={() => openPage('invitations')}/>,
+      invitations: <InvitationsPage token={inviteToken} teams={teams} onMenu={() => setDrawerOpen(true)} onLinkHandled={clearInviteToken} onChanged={async () => { await loadSpaces(); }} tab={params.tab} onTabChange={tab => void navigate(pagePath('invitations', teamId, tab) + (invitationToken(routeLocation.hash) ? routeLocation.hash : ''))}/>,
+      account: <AccountPage user={user} onUserChange={updated => setUser(previous => previous?.id === updated.id ? updated : previous)} onMenu={() => setDrawerOpen(true)} tab={params.tab} onTabChange={tab => void navigate(pagePath('account', teamId, tab))}/>,
+      storage: <StoragePage user={user} team={currentTeam} onMenu={() => setDrawerOpen(true)}/>,
+      settings: currentTeam && <TeamSettingsPage key={currentTeam.id} team={currentTeam} user={user} onMenu={() => setDrawerOpen(true)} onChanged={teamChanged} onLeave={teamLeft} tab={params.tab} onTabChange={tab => void navigate(pagePath('settings', teamId, tab))}/>,
+      notes: <><section className="note-list">
       <div className="note-list-head">
         <div className="list-heading"><Button className="mobile-nav-button" type="text" aria-label="打开文件夹与账号" icon={<MenuIcon size={20}/>} onClick={() => setDrawerOpen(true)}/><div><Title heading={6} style={{margin: 0}}>{scopeName}</Title><Text type="secondary">{visible.length} 篇</Text></div></div>
         <Space size={4}>
@@ -539,7 +583,9 @@ export function App() {
       </Space></div>
       <NoteEditor user={user!} teamId={teamId} key={(teamId ?? 'personal') + current.id} note={current} onSave={upsert} ref={editorRef} readOnly={batchBusy || current.canEdit === false} onComment={teamId && !current.deletedAt ? () => void safeSwitch(() => setActivity('comments')) : undefined}/>
       {activity && <Suspense fallback={null}><NoteActivity key={(teamId ?? 'personal') + current.id + activity} note={current} teamId={teamId} user={user} tab={activity} bridge={() => editorRef.current} onSave={upsert} onClose={() => setActivity(null)}/></Suspense>}
-    </> : <div className="editor-empty"><Empty description="留一点空间，给灵感"/><Button type="primary" icon={<Plus size={16}/>} disabled={!canCreate} onClick={() => void newNote()}>新建备忘录</Button></div>}</main></>}
+    </> : <div className="editor-empty"><Empty description="留一点空间，给灵感"/><Button type="primary" icon={<Plus size={16}/>} disabled={!canCreate} onClick={() => void newNote()}>新建备忘录</Button></div>}</main></>,
+    }}/>
+    </Suspense>
     <input ref={importInput} type="file" accept=".md,.markdown,.txt" multiple hidden aria-label="导入备忘录文件" onChange={event => { void importNotes(event.target.files); event.target.value = ''; }}/>
     <Modal title={folderDialog?.mode === 'rename' ? '重命名文件夹' : '新建文件夹'} visible={!!folderDialog} onOk={submitFolderDialog} onCancel={() => setFolderDialog(null)} maskClosable={false} style={{maxWidth: 'calc(100vw - 32px)'}}>
       <Input autoFocus placeholder="请输入文件夹名称" maxLength={60} value={folderDialog?.name || ''} onChange={name => setFolderDialog(previous => previous ? {...previous, name} : null)} onPressEnter={() => { void submitFolderDialog().catch(() => {}); }}/>

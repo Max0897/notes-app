@@ -143,6 +143,14 @@ test('隔离后端 API：认证、富文本、CRUD、版本冲突、用户隔离
   assert.ok(!finalNotes.json.notes.some((item) => item.id === id));
   await request('永久删除后不可恢复', '/notes/' + id, { method: 'PATCH', cookie: a, body: { version: 6, deletedAt: null }, status: 404 });
   await request('未知 API 返回 JSON 404', '/unknown', { cookie: a, headers: { Accept: 'text/html' }, status: 404 });
+  for (const path of ['/account/security', '/notifications', '/invitations/incoming', '/storage?team=test', '/teams/test/settings/members']) {
+    const page = await fetch(origin + path, {headers: {Accept: 'text/html'}});
+    assert.equal(page.status, 200, '独立页面直接刷新：' + path);
+    assert.match(page.headers.get('content-type'), /text\/html/);
+    assert.match(await page.text(), /<div id="root"><\/div>/);
+  }
+  const missingAsset = await fetch(origin + '/assets/nonexistent-routing-test.js', {headers: {Accept: 'text/html'}});
+  assert.equal(missingAsset.status, 404, '静态资源不存在时不回退到页面');
   await request('退出登录', '/auth/logout', { method: 'POST', cookie: a });
   await request('注销会话不可读笔记', '/notes', { cookie: a, status: 401 });
   t.diagnostic(`通过 ${checks} 次 HTTP 状态检查；临时 DATA_DIR=${dataDir}；测试端口=${port}`);

@@ -1,5 +1,5 @@
 import {useEffect, useRef, useState} from 'react';
-import {Alert, Button, Empty, Input, Message, Modal, Pagination, Select, Spin, Tabs, Tag, Typography} from '@arco-design/web-react';
+import {Alert, Button, Descriptions, Empty, Input, Message, Modal, Pagination, Select, Spin, Tabs, Tag, Typography} from '@arco-design/web-react';
 import {Copy, Link2, RefreshCw, RotateCcw, Unlink} from 'lucide-react';
 import {api, teamApi, isManager, roleNames, type Team, type TeamRole, type Folder, type User} from './api';
 import {UserAvatar} from './UserAvatar';
@@ -38,19 +38,19 @@ export function CreateTeamDialog({onClose, onCreated}: {onClose: () => void; onC
   </Modal>;
 }
 
-export function InvitationsPage({teams, token, onMenu, onLinkHandled, onChanged}: {teams: Team[]; token: string | null; onMenu: () => void; onLinkHandled: () => void; onChanged: () => Promise<void>}) {
+export function InvitationsPage({teams, token, onMenu, onLinkHandled, onChanged, tab, onTabChange}: {teams: Team[]; token: string | null; onMenu: () => void; onLinkHandled: () => void; onChanged: () => Promise<void>; tab?: string; onTabChange?: (tab: string) => void}) {
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [link, setLink] = useState<Invitation | null>(null), [linkError, setLinkError] = useState(''), [loading, setLoading] = useState(true);
   const {busy, run} = useTask();
   async function reload() { const data = await api('/invitations'); setInvitations(data.invitations); }
-  useEffect(() => { let active = true; api('/invitations').then(data => { if (active) setInvitations(data.invitations); }).catch(errorMessage).finally(() => { if (active) setLoading(false); });
+  useEffect(() => { let active = true; setLink(null); setLinkError(''); setLoading(true); api('/invitations').then(data => { if (active) setInvitations(data.invitations); }).catch(errorMessage).finally(() => { if (active) setLoading(false); });
     if (token) api('/invitations/link/' + encodeURIComponent(token)).then(data => { if (active) setLink(data.invitation); }).catch(error => { if (active) setLinkError(error.message); });
     return () => { active = false; }; }, [token]);
   async function respond(inv: Invitation, accept: boolean, linkToken?: string) {
     await run(async () => { await api('/invitations/' + inv.id + '/respond', 'POST', {accept, ...(linkToken ? {token: linkToken} : {})}); if (linkToken) { setLink(null); onLinkHandled(); } await reload(); await onChanged(); Message.success(accept ? '已加入团队，可在空间列表切换' : '已拒绝邀请'); });
   }
   return <WorkspacePage title="团队邀请" onMenu={onMenu} className="team-page" loading={loading}>
-    <Tabs defaultActiveTab="incoming">
+    <Tabs defaultActiveTab="incoming" activeTab={tab} onChange={onTabChange}>
       <Tabs.TabPane key="incoming" title="收到的邀请">
         {linkError && <Alert type="warning" content={linkError}/>}
         {link && <ListRow className="team-entry" actions={<Button type="primary" disabled={busy} onClick={() => void respond(link, true, token!)}>接受邀请并加入</Button>}><Text bold>{link.teamName}</Text><Text type="secondary">{link.inviter} 邀请你作为{roleNames[link.role]}加入 · {date(link.expiresAt)}前有效</Text></ListRow>}
@@ -67,7 +67,7 @@ export function InvitationsPage({teams, token, onMenu, onLinkHandled, onChanged}
   </WorkspacePage>;
 }
 
-export function TeamSettingsPage({team, user, onMenu, onChanged, onLeave}: {team: Team; user: User; onMenu: () => void; onChanged: () => Promise<void>; onLeave: () => Promise<void>}) {
+export function TeamSettingsPage({team, user, onMenu, onChanged, onLeave, tab, onTabChange}: {team: Team; user: User; onMenu: () => void; onChanged: () => Promise<void>; onLeave: () => Promise<void>; tab?: string; onTabChange?: (tab: string) => void}) {
   const [name, setName] = useState(team.name), [description, setDescription] = useState(team.description);
   const [members, setMembers] = useState<Member[]>([]), [memberSearch, setMemberSearch] = useState(''), [invites, setInvites] = useState<Invitation[]>([]);
   const [inviteUsername, setInviteUsername] = useState(''), [inviteRole, setInviteRole] = useState<TeamRole>('viewer');
@@ -77,6 +77,7 @@ export function TeamSettingsPage({team, user, onMenu, onChanged, onLeave}: {team
   const [activities, setActivities] = useState<{id: number; username: string; action: string; objectName: string; nickname?: string; createdAt: string}[]>([]);
   const [dissolve, setDissolve] = useState(false), [confirmName, setConfirmName] = useState(''), [password, setPassword] = useState('');
   const [loading, setLoading] = useState(true); const {busy, run} = useTask(); const manage = isManager(team);
+  const owner = members.find(member => member.role === 'owner');
   async function refresh() {
     const [people, folderData] = await Promise.all([teamApi(team.id, '/members'), teamApi(team.id, '/folders')]);
     setMembers(people.members); setFolders(folderData.folders);
@@ -101,10 +102,15 @@ export function TeamSettingsPage({team, user, onMenu, onChanged, onLeave}: {team
   }
   return <>
     <WorkspacePage title={'团队设置 · ' + team.name} onMenu={onMenu} className="team-page" loading={loading}>
-      <Spin loading={loading} style={{display: 'block', minWidth: 0}}><Tabs className="settings-tabs" defaultActiveTab="info" overflow="scroll">
+      <Spin loading={loading} style={{display: 'block', minWidth: 0}}><Tabs className="settings-tabs" defaultActiveTab="info" activeTab={tab} onChange={onTabChange} overflow="scroll">
         <Tabs.TabPane key="info" title="基本信息">
           <form className="account-form" onSubmit={event => { event.preventDefault(); void run(async () => { await teamApi(team.id, '', 'PATCH', {name, description}); await onChanged(); Message.success('团队信息已更新'); }); }}>
-            <Text type="secondary">你是{roleNames[team.role]} · {members.length} 位成员 · 所有者 {(members.find(m => m.role === 'owner')?.nickname || members.find(m => m.role === 'owner')?.username)} · 创建于 {date(team.createdAt)}</Text>
+            <Descriptions border size="default" layout="horizontal" valueStyle={{backgroundColor: 'var(--color-bg-2)', overflowWrap: 'anywhere'}} column={{xs: 1, sm: 1, md: 3, lg: 3, xl: 3, xxl: 3, xxxl: 3}} data={[
+              {label: '当前角色', value: roleNames[team.role]},
+              {label: '成员数量', value: `${members.length} 位`},
+              {label: '所有者', value: owner?.nickname || owner?.username || '—'},
+              {label: '创建时间', value: date(team.createdAt), span: 3},
+            ]}/>
             <Input aria-label="团队名称" placeholder="团队名称（2–40 字）" maxLength={40} value={name} onChange={setName} disabled={!manage || busy}/>
             <Input.TextArea aria-label="团队简介" placeholder="团队简介（最多 200 字）" maxLength={200} value={description} onChange={setDescription} disabled={!manage || busy}/>
             {manage && <Button type="primary" htmlType="submit" loading={busy}>保存团队信息</Button>}

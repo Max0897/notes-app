@@ -86,6 +86,19 @@
 
 ### 账号管理
 
+页面采用 React Router 嵌套路由，共用侧栏布局，内容通过 `Outlet` 切换。设置页面和 tab 都有独立 URL，支持直接访问、刷新保留位置和浏览器前进／后退。导航前先保存当前笔记，保存失败时保留编辑页面及草稿；批量操作期间阻止离开。
+
+| 页面 | 地址 |
+| --- | --- |
+| 备忘录 | `/notes` |
+| 账号设置 | `/account/profile`、`/account/security`、`/account/sessions` |
+| 通知中心 | `/notifications` |
+| 团队邀请 | `/invitations/incoming`、`/invitations/deleted` |
+| 存储空间 | `/storage` |
+| 团队设置 | `/teams/:teamId/settings/info`，其他 tab 为 `members`、`invites`、`access`、`activity` |
+
+个人页面在团队空间打开时通过 `?team=团队ID` 保留当前空间；团队设置直接从路径读取团队。旧版 `/#note=…&team=…` 与 `/#invite=…` 链接继续可用。服务端已有 SPA 回退，直接刷新页面地址会返回应用，未知 API 与静态资源仍返回 404。
+
 注册时可以选填昵称，留空则默认使用用户名；已有账号升级后也使用用户名作为默认昵称。在「账号设置 → 个人资料」中可修改 1–32 字符的昵称，在线协作中的头像提示和光标名称会即时更新，昵称允许重复。用户名保持唯一，用于登录、邀请和区分同名成员。
 
 新用户名采用白名单校验：3–32 位、英文字母开头，后续仅限英文字母、数字和下划线，唯一性与登录均不区分大小写。空格（含首尾空格）、中文、表情、全角字符及其他标点均不能用于注册；注册页与服务端共享同一规则，直接调用接口也无法绕过。该规则采用 [OWASP 建议的白名单与服务端校验原则](https://cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html)，具体字符范围为本项目的账号策略。历史账号保留原登录方式及邀请识别，不会自动改名或失效；昵称仍支持中文和表情。
@@ -435,6 +448,7 @@ npm run test:api
 npm run test:collaboration
 npm run test:images
 npm run test:editor-images
+npm run test:routing
 npm run test:docker
 ```
 
