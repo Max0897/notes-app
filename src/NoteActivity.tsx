@@ -27,7 +27,7 @@ async function commentPages(path: string, count: number) {
   return {...result, comments, next};
 }
 function Preview({content}: {content: any}) {
-  const editor = useEditor({extensions: [StarterKit, TaskList, TaskItem.configure({nested: true}), EditorLink, EditorImage, ...documentExtensions()], content, editable: false,
+  const editor = useEditor({extensions: [StarterKit.configure({codeBlock: false}), TaskList, TaskItem.configure({nested: true}), EditorLink, EditorImage, ...documentExtensions()], content, editable: false,
     editorProps: {handleDOMEvents: {click: (_view, event) => openEditorLink(event)}}});
   return <div className="snapshot-preview"><EditorContent editor={editor}/></div>;
 }

@@ -6,6 +6,7 @@ import Highlight from '@tiptap/extension-highlight';
 import {tableSize} from './editorTable';
 import {EditorSearch} from './editorSearch';
 import {SlashCommands} from './editorSlash';
+import {EditorCodeBlock} from './editorCodeBlock';
 
 // Reuse the same document nodes in personal notes, team notes and history previews.
 const EditorTable = Table.extend({
@@ -19,5 +20,5 @@ const EditorTable = Table.extend({
     }};
   },
 });
-export const documentExtensions = () => [EditorTable.configure({resizable: true, cellMinWidth: 64}), TableRow, TableHeader, TableCell, Highlight];
+export const documentExtensions = () => [EditorTable.configure({resizable: true, cellMinWidth: 64}), TableRow, TableHeader, TableCell, Highlight, EditorCodeBlock];
 export const interactionExtensions = () => [EditorSearch, SlashCommands];

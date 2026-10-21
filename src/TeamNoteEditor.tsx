@@ -58,7 +58,7 @@ const CollaborativeEditor = forwardRef<EditorBridge, Props & {session: Collabora
   const editable = !readOnly && state.canEdit && !state.error;
   function editing() { session.setEditing(true); clearTimeout(idle.current); idle.current = setTimeout(() => session.setEditing(false), 3000); }
   const editor = useEditor({
-    extensions: [StarterKit.configure({history: false}), TaskList, TaskItem.configure({nested: true}), EditorLink, EditorImage, ...documentExtensions(), ...interactionExtensions(),
+    extensions: [StarterKit.configure({history: false, codeBlock: false}), TaskList, TaskItem.configure({nested: true}), EditorLink, EditorImage, ...documentExtensions(), ...interactionExtensions(),
       ImageUploads.configure({path: '/api/teams/' + teamId + '/notes/' + note.id + '/images'}),
       Collaboration.configure({document: session.document}),
       CollaborationCursor.configure({provider: session.provider, user: state.me,

@@ -37,7 +37,7 @@ const latest=useRef(note),dirty=useRef(false),timer=useRef<ReturnType<typeof set
 // 最近一次成功入库的正文，用于判断「这次变更是否真的改了内容」
 const savedContent=useRef(canon(note.content));
 const conflictRef=useRef<Note|null>(null);
-const editor=useEditor({extensions:[StarterKit,TaskList,TaskItem.configure({nested:true}),EditorLink,EditorImage,...documentExtensions(),...interactionExtensions(),ImageUploads.configure({path:'/api'+(teamId?'/teams/'+teamId:'')+'/notes/'+note.id+'/images'})],editorProps:{handleDOMEvents:{click:(_view,event)=>openEditorLink(event)}},content:note.content,editable:!note.deletedAt&&!readOnly&&!recovery,onUpdate:({editor,transaction})=>{
+const editor=useEditor({extensions:[StarterKit.configure({codeBlock:false}),TaskList,TaskItem.configure({nested:true}),EditorLink,EditorImage,...documentExtensions(),...interactionExtensions(),ImageUploads.configure({path:'/api'+(teamId?'/teams/'+teamId:'')+'/notes/'+note.id+'/images'})],editorProps:{handleDOMEvents:{click:(_view,event)=>openEditorLink(event)}},content:note.content,editable:!note.deletedAt&&!readOnly&&!recovery,onUpdate:({editor,transaction})=>{
   if(!transaction.docChanged)return;
   // Tiptap 在聚焦、选区变化等情况下也会触发 update，此时文档其实没变。
   // 若一律标脏，单纯「点开一篇笔记」就会保存一次并刷新修改时间，笔记随即跳到列表最前。

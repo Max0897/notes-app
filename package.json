@@ -30,6 +30,7 @@
     "@hocuspocus/server": "4.7.1",
     "@hono/node-server": "^2.1.5",
     "@node-rs/argon2": "^2.2.2",
+    "@tiptap/extension-code-block": "2.27.3",
     "@tiptap/extension-collaboration": "2.27.3",
     "@tiptap/extension-collaboration-cursor": "2.27.3",
     "@tiptap/extension-highlight": "2.27.3",

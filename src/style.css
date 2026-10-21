@@ -175,6 +175,11 @@ body{overflow:hidden}
 .ProseMirror blockquote{margin:8px 0;padding:2px 12px;border-left:3px solid var(--color-border-3);color:var(--color-text-3)}
 .ProseMirror code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;background:var(--color-fill-2);padding:1px 4px;border-radius:2px}
 .ProseMirror pre{background:var(--color-fill-2);padding:12px 16px;overflow-x:auto}
+.ProseMirror .code-block{position:relative;margin:8px 0}
+.ProseMirror .code-block pre{margin:0;padding-right:44px}
+.code-copy-button{position:absolute;top:6px;right:6px;z-index:1;display:flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:0;border-radius:4px;background:transparent;color:var(--color-text-3);cursor:pointer}
+.code-copy-button:hover,.code-copy-button:focus-visible{background:var(--color-fill-3);color:var(--color-text-1)}
+@media (hover:hover) and (pointer:fine){.code-copy-button{opacity:0}.code-block:hover .code-copy-button,.code-copy-button:focus-visible{opacity:1}}
 .ProseMirror hr{border:none;border-top:1px solid var(--color-border-2);margin:16px 0}
 ul[data-type="taskList"]{list-style:none;padding-left:2px}
 ul[data-type="taskList"] li{display:flex;gap:8px}
