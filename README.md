@@ -30,6 +30,20 @@
 
 <img src="docs/images/mobile-navigation.jpg" alt="手机文件夹抽屉：所有备忘录、置顶、文件夹管理、账号管理与退出登录" width="280" />
 
+## 界面预览
+
+### 桌面端
+
+![桌面端三栏布局](docs/images/desktop.png)
+
+### 编辑与富文本
+
+![笔记编辑器](docs/images/editor.png)
+
+### 移动端
+
+![移动端布局](docs/images/mobile.png)
+
 ## 功能
 
 | 功能 | 说明 |
