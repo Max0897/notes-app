@@ -1,3 +1,5 @@
+import {Extension} from '@tiptap/core';
+import {Plugin, PluginKey} from '@tiptap/pm/state';
 import Table from '@tiptap/extension-table';
 import TableRow from '@tiptap/extension-table-row';
 import TableHeader from '@tiptap/extension-table-header';
@@ -20,5 +22,21 @@ const EditorTable = Table.extend({
     }};
   },
 });
-export const documentExtensions = () => [EditorTable.configure({resizable: true, cellMinWidth: 64}), TableRow, TableHeader, TableCell, Highlight, EditorCodeBlock];
+// A table as the last node leaves no caret position below it, so keep an empty paragraph there.
+// Remote Yjs transactions are skipped; every client adds it only on its own interaction.
+const TrailingParagraph = Extension.create({
+  name: 'trailingParagraph',
+  addProseMirrorPlugins() {
+    return [new Plugin({
+      key: new PluginKey('trailingParagraph'),
+      appendTransaction: (transactions, _old, state) => {
+        if (!this.editor.isEditable || transactions.some(tr => tr.getMeta('y-sync$')?.isChangeOrigin)) return null;
+        const last = state.doc.lastChild, paragraph = state.schema.nodes.paragraph;
+        if (last?.type.name !== 'table' || !paragraph) return null;
+        return state.tr.insert(state.doc.content.size, paragraph.create());
+      },
+    })];
+  },
+});
+export const documentExtensions = () => [EditorTable.configure({resizable: true, cellMinWidth: 64}), TableRow, TableHeader, TableCell, Highlight, EditorCodeBlock, TrailingParagraph];
 export const interactionExtensions = () => [EditorSearch, SlashCommands];
