@@ -10,6 +10,7 @@ import {WorkspacePage} from './WorkspacePage';
 import {downloadFiles} from './dataTransfer';
 import {dateMatches, snippet, type DateFilter} from './noteSearch';
 import {Highlight} from './Highlight';
+import {QuickSwitcher} from './QuickSwitcher';
 import {SidebarStorage} from './StorageUsage';
 import {useStorageUsage} from './storage';
 import {isValidNewUsername, USERNAME_PATTERN, USERNAME_RULE} from '../server/username';
@@ -60,7 +61,7 @@ export function App() {
   const [teamId, setTeamId] = useState<string | null>(routeTeamId), [teams, setTeams] = useState<Team[]>([]);
   const [spacesLoaded, setSpacesLoaded] = useState(false);
   const [spacesError, setSpacesError] = useState('');
-  const [createTeamOpen, setCreateTeamOpen] = useState(false);
+  const [createTeamOpen, setCreateTeamOpen] = useState(false), [quickOpen, setQuickOpen] = useState(false);
   const [inviteToken, setInviteToken] = useState<string | null>(null), [draft, setDraft] = useState('');
   const [unreadCount, setUnreadCount] = useState(0);
   const currentTeam = teams.find(t => t.id === teamId && !t.deletedAt);
@@ -413,6 +414,12 @@ export function App() {
     if (event.key === 'Escape' && document.querySelector('.editor-context-menu, .mention-options, .editor-find-panel, .editor-slash-menu, .editor-outline, .editor-bubble, .editor-focus-mode')) return;
     const modifier = (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey;
     const key = event.key.toLowerCase();
+    if (quickOpen) { if (modifier && (key === 'p' || key === 'k')) { event.preventDefault(); event.stopPropagation(); setQuickOpen(false); } return; }
+    if (modifier && (key === 'p' || event.code === 'KeyP') && !event.isComposing) {
+      event.preventDefault();
+      if (!createTeamOpen && !folderDialog && !batchBusy && view === 'notes') setQuickOpen(true);
+      return;
+    }
     if (modifier && (key === 's' || event.code === 'KeyS')) {
       event.preventDefault();
       if (!createTeamOpen && !folderDialog && !batchBusy && editorRef.current) {
@@ -487,6 +494,16 @@ export function App() {
     if (event.target !== event.currentTarget || !['Enter', ' '].includes(event.key)) return;
     event.preventDefault(); openNote(note);
   };
+  function openFromSwitcher(note: Note) {
+    setQuickOpen(false);
+    if (batchBusy) return;
+    void safeSwitch(() => {
+      const inScope = scope === 'all' || (scope === 'pinned' && note.pinned) || note.folderId === scope;
+      if (!inScope) setScope('all');
+      setSearch(''); setDateFilter('all'); setSearchIndex(-1); resetSelection(); setContextNoteId(null); setActivity(null);
+      selectNote(note.id); setMobile(true);
+    });
+  }
   function openNote(note: Note) {
     if (batchBusy) return;
     setContextNoteId(null);
@@ -494,6 +511,7 @@ export function App() {
   }
 
   return <div className={'app-shell' + (mobile ? ' mobile-edit' : '')}>
+    <QuickSwitcher visible={quickOpen} notes={notes} folders={folders} currentId={selected} onSelect={openFromSwitcher} onClose={() => setQuickOpen(false)}/>
     <aside className="sidebar"><div className="sidebar-brand"><img src="/favicon.svg" width={32} height={32} alt="备忘录"/><Title heading={6} style={{margin: 0}}>备忘录</Title></div>{navigation}</aside>
     <Drawer title="备忘录" placement="left" width="min(300px, 88vw)" visible={drawerOpen} onCancel={() => setDrawerOpen(false)} footer={null} unmountOnExit>
       <nav className="drawer-navigation" aria-label="文件夹与账号">{navigation}</nav>
