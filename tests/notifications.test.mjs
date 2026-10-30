@@ -14,7 +14,7 @@ async function fixture(t) {
   async function start() {
     child = spawn(process.execPath, ['--import', new URL('../node_modules/tsx/dist/loader.mjs', import.meta.url).href, fileURLToPath(new URL('../server/index.ts', import.meta.url))], {
       cwd: new URL('../', import.meta.url), stdio: ['ignore', 'pipe', 'pipe'],
-      env: {...process.env, HOST: '127.0.0.1', PORT: '0', DATA_DIR: dataDir, NODE_ENV: 'test', SECURE_COOKIES: 'false', PUBLIC_ORIGIN: '', TRUSTED_PROXY_IPS: ''},
+      env: {...process.env, HOST: '127.0.0.1', PORT: '0', DATA_DIR: dataDir, NODE_ENV: 'test', REGISTRATION_MODE: 'open', REGISTRATION_DAILY_LIMIT: '100000', SECURE_COOKIES: 'false', PUBLIC_ORIGIN: '', TRUSTED_PROXY_IPS: ''},
     });
     origin = await new Promise((resolve, reject) => {
       let output = '';

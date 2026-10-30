@@ -46,6 +46,7 @@ export function App() {
   const routeKey = useRef(routeLocation.key); routeKey.current = routeLocation.key;
   const [user, setUser] = useState<User | null>(null);
   const [boot, setBoot] = useState(true), [authMode, setAuthMode] = useState(false);
+  const [registration, setRegistration] = useState<{registration: 'closed' | 'invite' | 'open'; registrationFull: boolean} | null>(null), [inviteCode, setInviteCode] = useState('');
   const [nickname, setNickname] = useState('');
   const [username, setUsername] = useState(''), [password, setPassword] = useState(''), [authBusy, setAuthBusy] = useState(false);
   const [notes, setNotes] = useState<Note[]>([]), [folders, setFolders] = useState<Folder[]>([]);
@@ -111,6 +112,7 @@ export function App() {
     catch (error) { Message.error((error as Error).message); }
     finally { setLoading(false); }
   }
+  useEffect(() => { api('/auth/config').then(setRegistration).catch(() => {}); }, []);
   useEffect(() => { api('/auth/me').then(data => setUser(data.user)).catch(() => {}).finally(() => setBoot(false)); }, []);
   useEffect(() => {
     if (!userId) return;
@@ -186,7 +188,7 @@ export function App() {
     event.preventDefault();
     if (authMode && !isValidNewUsername(username)) { Message.warning(USERNAME_RULE); return; }
     setAuthBusy(true);
-    try { const data = await api('/auth/' + (authMode ? 'register' : 'login'), 'POST', {username, password, ...(authMode && nickname.trim() ? {nickname} : {})}); setLoading(true); setUser(data.user); setPassword(''); }
+    try { const data = await api('/auth/' + (authMode ? 'register' : 'login'), 'POST', {username, password, ...(authMode && nickname.trim() ? {nickname} : {}), ...(authMode && registration?.registration === 'invite' ? {inviteCode} : {})}); setLoading(true); setUser(data.user); setPassword(''); }
     catch (error) { Message.error((error as Error).message); }
     finally { setAuthBusy(false); }
   }
@@ -456,12 +458,14 @@ export function App() {
         value={username} onChange={setUsername} placeholder={authMode ? '例如 notes_2026' : '请输入用户名'} maxLength={32}
         pattern={authMode ? USERNAME_PATTERN : undefined} aria-describedby={authMode ? 'auth-username-rule' : undefined}/>
       {authMode && <Text id="auth-username-rule" type="secondary">{USERNAME_RULE}</Text>}
+      {authMode && registration?.registration === 'invite' && <Input aria-label="邀请码" autoComplete="off" value={inviteCode} onChange={setInviteCode} placeholder="邀请码" maxLength={128}/>}
       {authMode && <Input aria-label="注册昵称" autoComplete="nickname" value={nickname} onChange={setNickname} placeholder="昵称（选填，默认使用用户名）" maxLength={64}/>}
       <label htmlFor="auth-password"><Text type="secondary">密码</Text></label>
       <Input.Password id="auth-password" autoComplete={authMode ? 'new-password' : 'current-password'} value={password} onChange={setPassword} placeholder="至少 8 个字符" maxLength={128}/>
       <Button className="auth-submit" type="primary" long htmlType="submit" loading={authBusy}>{authMode ? '创建账号' : '登录'}</Button>
     </form>
-    <div className="auth-switch"><Text type="secondary">{authMode ? '已有账号？' : '还没有账号？'}</Text><Button type="text" size="small" onClick={() => setAuthMode(!authMode)}>{authMode ? '去登录' : '创建账号'}</Button></div>
+    {registration && registration.registration !== 'closed' && !registration.registrationFull ? <div className="auth-switch"><Text type="secondary">{authMode ? '已有账号？' : '还没有账号？'}</Text><Button type="text" size="small" onClick={() => setAuthMode(!authMode)}>{authMode ? '去登录' : '创建账号'}</Button></div>
+      : <div className="auth-switch"><Text type="secondary">{registration?.registrationFull ? '今日注册名额已满，请明天再来' : '当前未开放注册'}</Text></div>}
   </Card></div>;
 
   if (teamId !== routeTeamId || routeTeamId && (!spacesLoaded || !currentTeam)) return <div className="boot">{spacesError

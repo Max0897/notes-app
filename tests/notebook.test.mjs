@@ -21,7 +21,7 @@ async function until(check, label, timeout = 8000) {
 async function fixture(t) {
   const dataDir = await mkdtemp(resolve(tmpdir(), 'notes-notebook-')); let output = '';
   const child = spawn(process.execPath, ['--import', 'tsx', 'server/index.ts'], {cwd: fileURLToPath(new URL('../', import.meta.url)), stdio: ['ignore', 'pipe', 'pipe'],
-    env: {...process.env, HOST: '127.0.0.1', PORT: '0', DATA_DIR: dataDir, NODE_ENV: 'test', SECURE_COOKIES: 'false', PUBLIC_ORIGIN: '', TRUSTED_PROXY_IPS: ''}});
+    env: {...process.env, HOST: '127.0.0.1', PORT: '0', DATA_DIR: dataDir, NODE_ENV: 'test', REGISTRATION_MODE: 'open', REGISTRATION_DAILY_LIMIT: '100000', SECURE_COOKIES: 'false', PUBLIC_ORIGIN: '', TRUSTED_PROXY_IPS: ''}});
   child.stdout.on('data', chunk => { output += chunk; }); child.stderr.on('data', chunk => { output += chunk; });
   const clients = [];
   t.after(async () => { clients.forEach(client => client.destroy()); if (child.exitCode === null) { const exited = once(child, 'exit'); child.kill(); await exited; } await rm(dataDir, {recursive: true, force: true}); });

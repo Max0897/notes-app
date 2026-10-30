@@ -48,6 +48,7 @@
 
 | 功能 | 说明 |
 | --- | --- |
+| 注册控制 | 默认关闭注册；可切换为邀请码注册或开放注册，并限制全站每日新增账号数 |
 | 账号与隔离 | 注册、登录、退出、修改密码、退出其他设备；接口按当前登录用户隔离数据 |
 | 个性头像 | DiceBear 本地生成，统一 Cutouts 剪纸风格；支持换一个并保存到账号 |
 | 文件夹 | 个人文件夹删除后笔记移至未分类；团队文件夹支持成员权限、删除及恢复 |
@@ -305,6 +306,9 @@ npm run dev
 | `SECURE_COOKIES` | 跟随 `NODE_ENV` | `true` 启用 `Secure` 和 `__Host-` Cookie；直接使用 HTTP 时设为 `false` |
 | `PUBLIC_ORIGIN` | 空 | 唯一允许的网页来源，如 `https://notes.example.com`；留空时比较 `Origin` 与请求 Host |
 | `TRUSTED_PROXY_IPS` | 空 | 可选的受信任代理 TCP 对端 IP 白名单，逗号分隔；只有白名单中的来源可使用 `CF-Connecting-IP`，默认忽略全部转发头 |
+| `REGISTRATION_MODE` | `closed` | 注册开关：`closed` 不开放，`invite` 需邀请码，`open` 任何人可注册；取值错误时启动失败 |
+| `REGISTRATION_INVITE_CODES` | 空 | `invite` 模式的邀请码，逗号分隔，每个 8–128 个字符；可多人复用，更换邀请码改此变量并重启 |
+| `REGISTRATION_DAILY_LIMIT` | `20` | 全站每日（北京时间 00:00 重置）新增账号上限，所有模式生效；不小于 1 的整数 |
 | `IMAGE_PERSONAL_LIMIT_MB` | `200` | 每个个人空间的图片容量 |
 | `IMAGE_TEAM_LIMIT_MB` | `1024` | 每个团队的图片容量，固定额度，不随成员数量增加 |
 | `IMAGE_USER_DAILY_MB` | `100` | 每个用户跨所有空间的每日原始图片上传量 |

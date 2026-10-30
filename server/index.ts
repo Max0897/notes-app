@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID, createHash } from 'node:crypto';
+import { randomBytes, randomUUID, createHash, timingSafeEqual } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -37,6 +37,16 @@ const normalizeIp = (value: string) => value.toLowerCase().startsWith('::ffff:')
 const trustedProxyIps = new Set((process.env.TRUSTED_PROXY_IPS ?? '').split(',').map(value => normalizeIp(value.trim())).filter(Boolean));
 if ([...trustedProxyIps].some(value => !isIP(value))) throw new Error('TRUSTED_PROXY_IPS 必须是逗号分隔的代理 IP 地址');
 const COOKIE_NAME = secureCookies ? '__Host-notes_session' : 'notes_session';
+// 注册开关：closed（默认，不开放）/ invite（凭邀请码）/ open（任何人）。
+// 开放注册会被机器人批量注册，因此默认关闭；另有「每日新增账号数」全站上限兜底。
+const registrationMode = (process.env.REGISTRATION_MODE ?? 'closed').trim().toLowerCase();
+if (!['closed', 'invite', 'open'].includes(registrationMode)) throw new Error('REGISTRATION_MODE 必须是 closed、invite 或 open');
+const inviteCodes = (process.env.REGISTRATION_INVITE_CODES ?? '').split(',').map(value => value.trim()).filter(Boolean);
+if (inviteCodes.some(code => code.length < 8 || code.length > 128)) throw new Error('REGISTRATION_INVITE_CODES 中每个邀请码须为 8 至 128 个字符');
+if (registrationMode === 'invite' && !inviteCodes.length) throw new Error('REGISTRATION_MODE=invite 时必须通过 REGISTRATION_INVITE_CODES 配置邀请码（逗号分隔）');
+const inviteDigests = inviteCodes.map(code => createHash('sha256').update(code).digest());
+const registrationDailyLimit = Number(process.env.REGISTRATION_DAILY_LIMIT ?? '20');
+if (!Number.isInteger(registrationDailyLimit) || registrationDailyLimit < 1) throw new Error('REGISTRATION_DAILY_LIMIT 必须是不小于 1 的整数');
 const MAX_BODY_BYTES = 1024 * 1024;
 const MAX_CONTENT_BYTES = 512 * 1024;
 const MAX_TEXT_LENGTH = 200_000;
@@ -517,8 +527,26 @@ app.use('/api/*', (c, next) => bodyLimit({maxSize: isImageUpload(c) ? MAX_IMAGE_
 // 健康检查：容器编排用它判断实例是否存活，不要求登录。
 app.get('/api/health', (c) => c.json({ ok: true, uptime: Math.round(process.uptime()) }));
 
+// 按北京时间 00:00 重置，与图片每日额度一致。
+const BEIJING_OFFSET = 8 * 60 * 60 * 1000, DAY = 24 * 60 * 60 * 1000;
+function registeredToday() {
+  const start = new Date(Math.floor((Date.now() + BEIJING_OFFSET) / DAY) * DAY - BEIJING_OFFSET).toISOString();
+  return (db.prepare('SELECT COUNT(*) AS n FROM users WHERE created_at >= ?').get(start) as { n: number }).n;
+}
+function validInviteCode(value: unknown) {
+  if (typeof value !== 'string' || value.length > 128) return false;
+  const digest = createHash('sha256').update(value.trim()).digest();
+  let match = false;
+  for (const known of inviteDigests) if (timingSafeEqual(known, digest)) match = true;
+  return match;
+}
+// 公开接口，登录页据此决定是否显示注册入口；不返回邀请码或具体人数。
+app.get('/api/auth/config', (c) => c.json({ registration: registrationMode, registrationFull: registrationMode !== 'closed' && registeredToday() >= registrationDailyLimit }));
 app.post('/api/auth/register', async (c) => {
-  const body = await readBody(c, ['username', 'password', 'nickname']);
+  if (registrationMode === 'closed') throw new ApiError(403, '当前未开放注册');
+  const body = await readBody(c, ['username', 'password', 'nickname', 'inviteCode']);
+  if (registrationMode === 'invite' && !validInviteCode(body.inviteCode)) throw new ApiError(403, '邀请码无效');
+  if (registeredToday() >= registrationDailyLimit) throw new ApiError(403, '今日注册名额已满，请明天再试');
   const { username, usernameKey, password } = credentials(body, true);
   const nickname = nicknameValue(body.nickname, username);
   const id = randomUUID();
@@ -527,6 +555,8 @@ app.post('/api/auth/register', async (c) => {
   const session = newSession();
   const createUser = db.transaction(() => {
     if (db.prepare('SELECT id FROM users WHERE username_key = ?').get(usernameKey)) throw new ApiError(409, '用户名已被使用');
+    // 哈希期间可能有并发注册，写入前在事务内再核对一次上限。
+    if (registeredToday() >= registrationDailyLimit) throw new ApiError(403, '今日注册名额已满，请明天再试');
     const now = new Date().toISOString();
     db.prepare('INSERT INTO users (id, username, username_key, password_hash, created_at) VALUES (?, ?, ?, ?, ?)').run(user.id, username, usernameKey, passwordHash, now);
     db.prepare('UPDATE users SET nickname=? WHERE id=?').run(nickname, user.id);

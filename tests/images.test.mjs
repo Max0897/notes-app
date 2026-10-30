@@ -29,7 +29,7 @@ async function fixture(t, env = {}) {
   async function start() {
     output = '';
     child = spawn(process.execPath, ['--import', 'tsx', 'server/index.ts'], {cwd: fileURLToPath(new URL('../', import.meta.url)), stdio: ['ignore', 'pipe', 'pipe'],
-      env: {...process.env, HOST: '127.0.0.1', PORT: '0', DATA_DIR: dataDir, NODE_ENV: 'test', SECURE_COOKIES: 'false', PUBLIC_ORIGIN: '', TRUSTED_PROXY_IPS: '', ...env}});
+      env: {...process.env, HOST: '127.0.0.1', PORT: '0', DATA_DIR: dataDir, NODE_ENV: 'test', REGISTRATION_MODE: 'open', REGISTRATION_DAILY_LIMIT: '100000', SECURE_COOKIES: 'false', PUBLIC_ORIGIN: '', TRUSTED_PROXY_IPS: '', ...env}});
     child.stdout.on('data', chunk => { output += chunk; }); child.stderr.on('data', chunk => { output += chunk; });
     await until(() => /监听 127\.0\.0\.1:\d+/.test(output), '启动服务').catch(error => { throw new Error(error.message + output); });
     origin = 'http://127.0.0.1:' + /监听 127\.0\.0\.1:(\d+)/.exec(output)[1];

@@ -10,7 +10,7 @@
     "build": "tsc -b && vite build && tsc -p tsconfig.server.json",
     "build:server": "tsc -p tsconfig.server.json",
     "typecheck": "tsc -b",
-    "test:api": "node --test tests/api.test.mjs tests/management.test.mjs tests/teams.test.mjs tests/notifications.test.mjs",
+    "test:api": "node --test tests/api.test.mjs tests/registration.test.mjs tests/management.test.mjs tests/teams.test.mjs tests/notifications.test.mjs",
     "test:collaboration": "node --import tsx --test tests/realtime.test.mjs",
     "test:notebook": "node --import tsx --test tests/notebook.test.mjs",
     "test:images": "node --import tsx --test tests/images.test.mjs tests/storage.test.mjs",
