@@ -46,7 +46,7 @@ export function InvitePanel({active}: {active: boolean}) {
       <label htmlFor="invite-link">邀请链接</label>
       <Input id="invite-link" value={link} readOnly aria-label="邀请链接"/>
     </div>
-    <Text type="secondary">对方打开链接会自动填入邀请码。邀请码长期有效，不要公开发布；如果泄露，重置即可。每人每天最多邀请 {state.dailyLimit} 人（今日已邀请 {state.invitedToday} 人）。</Text>
+    <Text type="secondary">每人每天最多邀请 {state.dailyLimit} 人（今日已邀请 {state.invitedToday} 人）。</Text>
     <div style={{display: 'flex', gap: 8}}>
       <Button type="primary" icon={<Copy size={16}/>} onClick={() => void copy()}>复制邀请链接</Button>
       <Button icon={<RefreshCw size={16}/>} loading={busy} onClick={reset}>重置邀请码</Button>
