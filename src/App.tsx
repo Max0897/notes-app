@@ -462,11 +462,12 @@ export function App() {
     <form className="auth-form" onSubmit={auth}>
       <label htmlFor="auth-username"><Text type="secondary">用户名</Text></label>
       <Input id="auth-username" autoComplete="username" autoCapitalize="none" autoCorrect="off" spellCheck={false} required
-        value={username} onChange={setUsername} placeholder={authMode ? '例如 notes_2026' : '请输入用户名'} maxLength={32}
-        pattern={authMode ? USERNAME_PATTERN : undefined} aria-describedby={authMode ? 'auth-username-rule' : undefined}/>
-      {authMode && <Text id="auth-username-rule" type="secondary">{USERNAME_RULE}</Text>}
-      {authMode && <Input aria-label="邀请码" autoComplete="off" value={inviteCode} onChange={value => setInviteCode(value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6))} placeholder={registration?.bootstrap ? '邀请码（首个账号无需填写）' : '邀请码（6 位）'} maxLength={6}/>}
-      {authMode && <Input aria-label="注册昵称" autoComplete="nickname" value={nickname} onChange={setNickname} placeholder="昵称（选填，默认使用用户名）" maxLength={64}/>}
+        value={username} onChange={setUsername} placeholder={authMode ? '3–32 位，字母开头，可含数字和下划线' : '请输入用户名'} maxLength={32}
+        pattern={authMode ? USERNAME_PATTERN : undefined} title={authMode ? USERNAME_RULE : undefined}/>
+      {authMode && <label htmlFor="auth-invite"><Text type="secondary">邀请码</Text></label>}
+      {authMode && <Input id="auth-invite" autoComplete="off" value={inviteCode} onChange={value => setInviteCode(value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6))} placeholder={registration?.bootstrap ? '邀请码（首个账号无需填写）' : '邀请码（6 位）'} maxLength={6}/>}
+      {authMode && <label htmlFor="auth-nickname"><Text type="secondary">昵称</Text></label>}
+      {authMode && <Input id="auth-nickname" autoComplete="nickname" value={nickname} onChange={setNickname} placeholder="昵称（选填，默认使用用户名）" maxLength={64}/>}
       <label htmlFor="auth-password"><Text type="secondary">密码</Text></label>
       <Input.Password id="auth-password" autoComplete={authMode ? 'new-password' : 'current-password'} value={password} onChange={setPassword} placeholder="至少 8 个字符" maxLength={128}/>
       <Button className="auth-submit" type="primary" long htmlType="submit" loading={authBusy}>{authMode ? '创建账号' : '登录'}</Button>
