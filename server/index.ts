@@ -15,6 +15,7 @@ import {initCollaboration, registerCollaboration} from './teams.js';
 import {initNotifications, registerNotifications} from './notifications.js';
 import {createRealtime} from './realtime.js';
 import {initNotebook, registerNotebook} from './notebook.js';
+import {initWebhooks} from './webhooks.js';
 import {initImages, isImageUpload, MAX_IMAGE_BYTES} from './images.js';
 import {isValidNewUsername, USERNAME_RULE} from './username.js';
 import {isAvatarStyle} from './avatarStyles.js';
@@ -364,6 +365,7 @@ initNotebook(db);
 const images = initImages(db, dataDir, ApiError);
 const realtime = createRealtime(db, {cookieName: COOKIE_NAME, publicOrigin, validateContent, validateImages: images.validateReferences});
 initNotifications(db);
+const webhooks = initWebhooks(db, {dataDir, publicOrigin});
 collaboration.cleanup();
 images.cleanup();
 const deleteExpiredSessions = db.prepare('DELETE FROM sessions WHERE expires_at <= ?');
@@ -734,6 +736,7 @@ app.post('/api/auth/logout-others', requireAuth, async c => {
 images.register(app, requireAuth, requireLiveSession);
 registerCollaboration(app, db, {readBody, requireAuth, requireLiveSession, verifyCurrentPassword, validateContent, validateImages: images.validateReferences, folderName, ApiError, dataDir});
 registerNotifications(app, db, {readBody, requireAuth, requireLiveSession, ApiError});
+webhooks.register(app, {requireAuth, requireLiveSession, readBody, ApiError, takeRateLimit});
 registerNotebook(app, db, {readBody, requireAuth, requireLiveSession, validateContent, validateImages: images.validateReferences, ApiError, restore: realtime.restore});
 
 app.use('/api/folders', requireAuth);
@@ -917,8 +920,10 @@ const server = serve({ fetch: app.fetch, hostname: host, port }, (info) => {
   console.log(`记事本后端已启动，监听 ${host}:${info.port}`);
 });
 realtime.attach(server as import('node:http').Server);
+webhooks.start();
 async function shutdown() {
   clearInterval(maintenance);
+  webhooks.stop();
   await realtime.close();
   server.close(() => { db.close(); });
 }

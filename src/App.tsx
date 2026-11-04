@@ -1,7 +1,7 @@
 import {lazy, Suspense, useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent} from 'react';
 import {Outlet, useLocation, useMatches, useNavigate, useParams} from 'react-router-dom';
 import {Badge, Button, Card, Checkbox, Drawer, Dropdown, Empty, Input, List, Menu, Message, Modal, Select, Space, Spin, Tag, Tooltip, Typography} from '@arco-design/web-react';
-import {ArrowLeft, Bell, BookOpen, Check, CheckSquare, Edit3, FileCode2, FileText, Folder as FolderIcon, Mail, Menu as MenuIcon, MoreHorizontal, Pencil, Plus, RotateCcw, Search, Settings, Star, Trash2, History, Link as LinkIcon, MessageSquare, Upload, ListTree, Maximize2} from 'lucide-react';
+import {ArrowLeft, Clock, Bell, BookOpen, Check, CheckSquare, Edit3, FileCode2, FileText, Folder as FolderIcon, Mail, Menu as MenuIcon, MoreHorizontal, Pencil, Plus, RotateCcw, Search, Settings, Star, Trash2, History, Link as LinkIcon, MessageSquare, Upload, ListTree, Maximize2} from 'lucide-react';
 import {api, ApiError, isManager, type AppNotification, type Team, type EditorBridge, type Folder, type Note, type User} from './api';
 import {AccountMenu} from './AccountMenu';
 import {NoteEditor} from './NoteEditor';
@@ -11,6 +11,7 @@ import {downloadFiles} from './dataTransfer';
 import {dateMatches, snippet, type DateFilter} from './noteSearch';
 import {Highlight} from './Highlight';
 import {QuickSwitcher} from './QuickSwitcher';
+import {SchedulePushModal} from './SchedulePushModal';
 import {SidebarStorage} from './StorageUsage';
 import {useStorageUsage} from './storage';
 import {isValidNewUsername, USERNAME_PATTERN, USERNAME_RULE} from '../server/username';
@@ -62,7 +63,7 @@ export function App() {
   const [teamId, setTeamId] = useState<string | null>(routeTeamId), [teams, setTeams] = useState<Team[]>([]);
   const [spacesLoaded, setSpacesLoaded] = useState(false);
   const [spacesError, setSpacesError] = useState('');
-  const [createTeamOpen, setCreateTeamOpen] = useState(false), [quickOpen, setQuickOpen] = useState(false);
+  const [createTeamOpen, setCreateTeamOpen] = useState(false), [quickOpen, setQuickOpen] = useState(false), [scheduleNote, setScheduleNote] = useState<Note | null>(null);
   const [inviteToken, setInviteToken] = useState<string | null>(null), [draft, setDraft] = useState('');
   const [unreadCount, setUnreadCount] = useState(0);
   const currentTeam = teams.find(t => t.id === teamId && !t.deletedAt);
@@ -523,6 +524,7 @@ export function App() {
   }
 
   return <div className={'app-shell' + (mobile ? ' mobile-edit' : '')}>
+    {scheduleNote && <SchedulePushModal note={scheduleNote} onClose={() => setScheduleNote(null)}/>}
     <QuickSwitcher visible={quickOpen} notes={notes} folders={folders} currentId={selected} onSelect={openFromSwitcher} onClose={() => setQuickOpen(false)}/>
     <aside className="sidebar"><div className="sidebar-brand"><img src="/favicon.svg" width={32} height={32} alt="备忘录"/><Title heading={6} style={{margin: 0}}>备忘录</Title></div>{navigation}</aside>
     <Drawer title="备忘录" placement="left" width="min(300px, 88vw)" visible={drawerOpen} onCancel={() => setDrawerOpen(false)} footer={null} unmountOnExit>
@@ -600,6 +602,7 @@ export function App() {
           else if (String(key).startsWith('move:')) moveNote(current, String(key).slice(5) || null);
           else if (key === 'trash') void mutate({deletedAt: new Date().toISOString()});
           else if (key === 'delete') permaDelete();
+          else if (key === 'schedule') setScheduleNote(current);
           else if (key === 'history' || key === 'comments') void safeSwitch(() => setActivity(key));
         }}>
           <Menu.Item key="find"><Ico Icon={Search} text="查找替换"/></Menu.Item>
@@ -609,6 +612,7 @@ export function App() {
           {!current.deletedAt && folderMoveMenu(writableFolders, current.folderId, current.canEdit === false)}
           {!current.deletedAt && <Menu.Item key="history"><Ico Icon={History} text="历史版本"/></Menu.Item>}
           {!current.deletedAt && teamId && <Menu.Item key="comments"><Ico Icon={MessageSquare} text="评论"/></Menu.Item>}
+          {!current.deletedAt && !teamId && <Menu.Item key="schedule"><Ico Icon={Clock} text="定时推送"/></Menu.Item>}
           <Menu.Item key="link"><Ico Icon={LinkIcon} text="复制链接"/></Menu.Item>
           <Menu.Item key="export-md"><Ico Icon={FileCode2} text="导出 MD"/></Menu.Item>
           <Menu.Item key="export-txt"><Ico Icon={FileText} text="导出纯文本"/></Menu.Item>

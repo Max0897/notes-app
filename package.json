@@ -17,6 +17,8 @@
     "test:editor-images": "tsx --tsconfig tsconfig.app.json tests/editor-images.test.mjs",
     "test:editor-features": "tsx --tsconfig tsconfig.app.json tests/editor-features.test.mjs",
     "test:routing": "tsx --tsconfig tsconfig.app.json tests/routing.test.mjs",
+    "test:webhooks": "node --import tsx --test tests/webhooks.test.mjs",
+    "webhook:receiver": "node scripts/webhook-receiver.mjs",
     "test:docker": "node tests/docker-config-check.mjs",
     "test:e2e": "node tests/e2e-public.mjs",
     "lint": "oxlint",

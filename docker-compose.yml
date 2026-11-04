@@ -26,6 +26,8 @@ services:
       # 可选：仅列出受信任代理的实际 TCP 对端 IP，允许其传入 CF-Connecting-IP。
       # 不要填写公网客户端地址或任意来源；留空时不信任转发头。
       TRUSTED_PROXY_IPS: ""
+      # 本地开发用：设为 true 可让 Webhook 访问 127.0.0.1 与内网地址（容器内访问宿主机用 host.docker.internal）。公网服务器上不要开启。
+      WEBHOOK_ALLOW_PRIVATE: "${WEBHOOK_ALLOW_PRIVATE:-false}"
       IMAGE_PERSONAL_LIMIT_MB: "${IMAGE_PERSONAL_LIMIT_MB:-200}"
       IMAGE_TEAM_LIMIT_MB: "${IMAGE_TEAM_LIMIT_MB:-1024}"
       IMAGE_USER_DAILY_MB: "${IMAGE_USER_DAILY_MB:-100}"

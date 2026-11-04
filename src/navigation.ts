@@ -5,7 +5,7 @@ import type {EditorBridge} from './api';
 export const pageTitles = {notifications: '通知中心', invitations: '团队邀请', settings: '团队设置', account: '账号设置', storage: '存储空间'};
 export type SettingsPage = keyof typeof pageTitles;
 export type WorkspaceView = 'notes' | SettingsPage;
-export const pageTabs = {account: ['profile', 'security', 'invites', 'sessions'], settings: ['info', 'members', 'invites', 'access', 'activity'], invitations: ['incoming', 'deleted']} as const;
+export const pageTabs = {account: ['profile', 'security', 'invites', 'webhooks', 'sessions'], settings: ['info', 'members', 'invites', 'access', 'activity'], invitations: ['incoming', 'deleted']} as const;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function linkedNote(hash: string) {
