@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID, createHash, timingSafeEqual } from 'node:crypto';
+import { randomBytes, randomUUID, createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -37,16 +37,15 @@ const normalizeIp = (value: string) => value.toLowerCase().startsWith('::ffff:')
 const trustedProxyIps = new Set((process.env.TRUSTED_PROXY_IPS ?? '').split(',').map(value => normalizeIp(value.trim())).filter(Boolean));
 if ([...trustedProxyIps].some(value => !isIP(value))) throw new Error('TRUSTED_PROXY_IPS 必须是逗号分隔的代理 IP 地址');
 const COOKIE_NAME = secureCookies ? '__Host-notes_session' : 'notes_session';
-// 注册开关：closed（默认，不开放）/ invite（凭邀请码）/ open（任何人）。
-// 开放注册会被机器人批量注册，因此默认关闭；另有「每日新增账号数」全站上限兜底。
-const registrationMode = (process.env.REGISTRATION_MODE ?? 'closed').trim().toLowerCase();
-if (!['closed', 'invite', 'open'].includes(registrationMode)) throw new Error('REGISTRATION_MODE 必须是 closed、invite 或 open');
-const inviteCodes = (process.env.REGISTRATION_INVITE_CODES ?? '').split(',').map(value => value.trim()).filter(Boolean);
-if (inviteCodes.some(code => code.length < 8 || code.length > 128)) throw new Error('REGISTRATION_INVITE_CODES 中每个邀请码须为 8 至 128 个字符');
-if (registrationMode === 'invite' && !inviteCodes.length) throw new Error('REGISTRATION_MODE=invite 时必须通过 REGISTRATION_INVITE_CODES 配置邀请码（逗号分隔）');
-const inviteDigests = inviteCodes.map(code => createHash('sha256').update(code).digest());
+// 注册一律为邀请制：服务器上尚无账号时首个账号免邀请码，其余凭已注册满 24 小时用户的个人邀请码。
+// 另有「每日新增账号数」全站上限兜底。仅测试进程（NODE_ENV=test）可用 TEST_OPEN_REGISTRATION 跳过邀请码。
+const testOpenRegistration = process.env.NODE_ENV === 'test' && process.env.TEST_OPEN_REGISTRATION === 'true';
 const registrationDailyLimit = Number(process.env.REGISTRATION_DAILY_LIMIT ?? '20');
 if (!Number.isInteger(registrationDailyLimit) || registrationDailyLimit < 1) throw new Error('REGISTRATION_DAILY_LIMIT 必须是不小于 1 的整数');
+// 每人每天（北京时间）最多邀请的人数，防止一个邀请码占满全站名额。
+const inviteDailyLimit = Number(process.env.INVITE_DAILY_LIMIT_PER_USER ?? '5');
+if (!Number.isInteger(inviteDailyLimit) || inviteDailyLimit < 1) throw new Error('INVITE_DAILY_LIMIT_PER_USER 必须是不小于 1 的整数');
+const INVITE_MIN_ACCOUNT_AGE = 24 * 60 * 60 * 1000;
 const MAX_BODY_BYTES = 1024 * 1024;
 const MAX_CONTENT_BYTES = 512 * 1024;
 const MAX_TEXT_LENGTH = 200_000;
@@ -353,6 +352,12 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS notes_user_folder ON notes(user_id, folder_id);
 `);
 if (!(db.prepare('PRAGMA table_info(users)').all() as {name: string}[]).some(column => column.name === 'nickname')) db.exec("ALTER TABLE users ADD COLUMN nickname TEXT NOT NULL DEFAULT ''");
+{
+  const columns = new Set((db.prepare('PRAGMA table_info(users)').all() as {name: string}[]).map(column => column.name));
+  if (!columns.has('invite_code')) db.exec('ALTER TABLE users ADD COLUMN invite_code TEXT');
+  if (!columns.has('invited_by')) db.exec('ALTER TABLE users ADD COLUMN invited_by TEXT');
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_invite_code ON users(invite_code) WHERE invite_code IS NOT NULL; CREATE INDEX IF NOT EXISTS users_invited_by ON users(invited_by)');
+}
 const collaboration = initCollaboration(db);
 initNotebook(db);
 const images = initImages(db, dataDir, ApiError);
@@ -438,6 +443,15 @@ function takeRateLimit(key: string, maximum: number, windowMs: number): number {
   if (++bucket.count > maximum) return Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
   return 0;
 }
+function rateLimited(key: string, maximum: number): number {
+  const bucket = buckets.get(key);
+  return bucket && bucket.resetAt > Date.now() && bucket.count >= maximum ? Math.max(1, Math.ceil((bucket.resetAt - Date.now()) / 1000)) : 0;
+}
+function clientIp(c: AppContext) {
+  const peer = normalizeIp(getConnInfo(c).remote.address ?? 'unknown');
+  const forwarded = c.req.header('cf-connecting-ip')?.trim();
+  return trustedProxyIps.has(peer) && forwarded && isIP(forwarded) ? normalizeIp(forwarded) : peer;
+}
 let passwordJobs = 0;
 const dummyPasswordHash = hash(randomBytes(32).toString('hex'), passwordOptions);
 async function passwordJob<T>(work: () => Promise<T>): Promise<T> {
@@ -480,9 +494,7 @@ app.use('/api/*', async (c, next) => {
 });
 app.use('/api/*', async (c, next) => {
   c.header('Cache-Control', 'no-store');
-  const peer = normalizeIp(getConnInfo(c).remote.address ?? 'unknown');
-  const forwarded = c.req.header('cf-connecting-ip')?.trim();
-  const ip = trustedProxyIps.has(peer) && forwarded && isIP(forwarded) ? normalizeIp(forwarded) : peer;
+  const ip = clientIp(c);
   const user = c.get('user');
   let retry = takeRateLimit(user ? `api-user:${user.id}` : `api-ip:${ip}`, 180, 60_000);
   if (c.req.method === 'POST' && (c.req.path === '/api/auth/login' || c.req.path === '/api/auth/register')) {
@@ -529,23 +541,63 @@ app.get('/api/health', (c) => c.json({ ok: true, uptime: Math.round(process.upti
 
 // 按北京时间 00:00 重置，与图片每日额度一致。
 const BEIJING_OFFSET = 8 * 60 * 60 * 1000, DAY = 24 * 60 * 60 * 1000;
+const dayStart = () => new Date(Math.floor((Date.now() + BEIJING_OFFSET) / DAY) * DAY - BEIJING_OFFSET).toISOString();
 function registeredToday() {
-  const start = new Date(Math.floor((Date.now() + BEIJING_OFFSET) / DAY) * DAY - BEIJING_OFFSET).toISOString();
-  return (db.prepare('SELECT COUNT(*) AS n FROM users WHERE created_at >= ?').get(start) as { n: number }).n;
+  return (db.prepare('SELECT COUNT(*) AS n FROM users WHERE created_at >= ?').get(dayStart()) as { n: number }).n;
 }
-function validInviteCode(value: unknown) {
-  if (typeof value !== 'string' || value.length > 128) return false;
-  const digest = createHash('sha256').update(value.trim()).digest();
-  let match = false;
-  for (const known of inviteDigests) if (timingSafeEqual(known, digest)) match = true;
-  return match;
+const hasUsers = () => !!db.prepare('SELECT 1 FROM users LIMIT 1').get();
+
+// 邀请码：6 位，去掉 I/L/O 与 0/1 等易混字符共 31 个，不区分大小写；每个用户一个，长期有效，可重置。
+const INVITE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+const INVITE_PATTERN = /^[A-HJKMNP-Z2-9]{6}$/;
+function newInviteCode() {
+  let code = '';
+  while (code.length < 6) for (const byte of randomBytes(12)) if (byte < 248 && code.length < 6) code += INVITE_ALPHABET[byte % 31];
+  return code;
 }
-// 公开接口，登录页据此决定是否显示注册入口；不返回邀请码或具体人数。
-app.get('/api/auth/config', (c) => c.json({ registration: registrationMode, registrationFull: registrationMode !== 'closed' && registeredToday() >= registrationDailyLimit }));
+function assignInviteCode(userId: string) {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const code = newInviteCode();
+    try { db.prepare('UPDATE users SET invite_code = ? WHERE id = ?').run(code, userId); return code; }
+    catch (error) { if ((error as { code?: string }).code !== 'SQLITE_CONSTRAINT_UNIQUE') throw error; }
+  }
+  throw new ApiError(503, '邀请码生成失败，请稍后重试');
+}
+function findInviter(value: unknown) {
+  const code = typeof value === 'string' ? value.toUpperCase().replace(/[\s-]/g, '') : '';
+  return INVITE_PATTERN.test(code) ? db.prepare('SELECT id FROM users WHERE invite_code = ?').get(code) as { id: string } | undefined : undefined;
+}
+const invitedToday = (inviterId: string) => (db.prepare('SELECT COUNT(*) AS n FROM users WHERE invited_by = ? AND created_at >= ?').get(inviterId, dayStart()) as { n: number }).n;
+function inviteState(userId: string) {
+  const row = db.prepare('SELECT created_at, invite_code FROM users WHERE id = ?').get(userId) as { created_at: string; invite_code: string | null };
+  const eligibleAt = new Date(Date.parse(row.created_at) + INVITE_MIN_ACCOUNT_AGE).toISOString();
+  const base = { eligibleAt, dailyLimit: inviteDailyLimit };
+  if (Date.now() < Date.parse(eligibleAt)) return { ...base, eligible: false, code: null, invitedToday: 0, invitees: [] };
+  const invitees = db.prepare('SELECT nickname, created_at AS createdAt FROM users WHERE invited_by = ? ORDER BY created_at DESC, id LIMIT 100').all(userId);
+  return { ...base, eligible: true, code: row.invite_code ?? assignInviteCode(userId), invitedToday: invitedToday(userId), invitees };
+}
+app.get('/api/invite', requireAuth, (c) => c.json(inviteState(c.get('user')!.id)));
+app.post('/api/invite/reset', requireAuth, (c) => {
+  const user = c.get('user')!;
+  const retry = takeRateLimit(`invite-reset:${user.id}`, 10, 60 * 60_000);
+  if (retry) { c.header('Retry-After', String(retry)); throw new ApiError(429, '重置过于频繁，请稍后重试'); }
+  if (!inviteState(user.id).eligible) throw new ApiError(403, '账号注册满 24 小时后才能使用邀请码');
+  assignInviteCode(user.id);
+  return c.json(inviteState(user.id));
+});
+
+// 公开接口，登录页据此决定是否显示注册入口；bootstrap 表示尚无任何账号（首个账号无需邀请码）。
+app.get('/api/auth/config', (c) => c.json({ registrationFull: registeredToday() >= registrationDailyLimit, bootstrap: !hasUsers() }));
 app.post('/api/auth/register', async (c) => {
-  if (registrationMode === 'closed') throw new ApiError(403, '当前未开放注册');
   const body = await readBody(c, ['username', 'password', 'nickname', 'inviteCode']);
-  if (registrationMode === 'invite' && !validInviteCode(body.inviteCode)) throw new ApiError(403, '邀请码无效');
+  const ip = clientIp(c);
+  // 邀请码只有约 30 位随机性，失败尝试单独限流；放在校验之前，被限流后连正确的码也不再受理。
+  const inviteFailureKey = `invite-fail:${ip}`;
+  if (!testOpenRegistration && hasUsers()) {
+    const blocked = rateLimited(inviteFailureKey, 20);
+    if (blocked) { c.header('Retry-After', String(blocked)); throw new ApiError(429, '邀请码尝试次数过多，请稍后重试'); }
+    if (!findInviter(body.inviteCode)) { takeRateLimit(inviteFailureKey, 20, 60 * 60_000); throw new ApiError(403, '邀请码无效'); }
+  }
   if (registeredToday() >= registrationDailyLimit) throw new ApiError(403, '今日注册名额已满，请明天再试');
   const { username, usernameKey, password } = credentials(body, true);
   const nickname = nicknameValue(body.nickname, username);
@@ -555,11 +607,18 @@ app.post('/api/auth/register', async (c) => {
   const session = newSession();
   const createUser = db.transaction(() => {
     if (db.prepare('SELECT id FROM users WHERE username_key = ?').get(usernameKey)) throw new ApiError(409, '用户名已被使用');
-    // 哈希期间可能有并发注册，写入前在事务内再核对一次上限。
+    // 哈希期间可能有并发注册或邀请码被重置，写入前在事务内再核对一次。
     if (registeredToday() >= registrationDailyLimit) throw new ApiError(403, '今日注册名额已满，请明天再试');
+    let invitedBy: string | null = null;
+    if (!testOpenRegistration && hasUsers()) {
+      const inviter = findInviter(body.inviteCode);
+      if (!inviter) { takeRateLimit(inviteFailureKey, 20, 60 * 60_000); throw new ApiError(403, '邀请码无效'); }
+      if (invitedToday(inviter.id) >= inviteDailyLimit) throw new ApiError(403, '该邀请码今日邀请名额已满，请明天再试');
+      invitedBy = inviter.id;
+    }
     const now = new Date().toISOString();
     db.prepare('INSERT INTO users (id, username, username_key, password_hash, created_at) VALUES (?, ?, ?, ?, ?)').run(user.id, username, usernameKey, passwordHash, now);
-    db.prepare('UPDATE users SET nickname=? WHERE id=?').run(nickname, user.id);
+    db.prepare('UPDATE users SET nickname=?, invited_by=? WHERE id=?').run(nickname, invitedBy, user.id);
     const folderId = randomUUID();
     db.prepare('INSERT INTO folders (id, user_id, name) VALUES (?, ?, ?)').run(folderId, user.id, '备忘录');
     const welcome = '欢迎使用记事本！你可以创建文件夹、编辑笔记、置顶重要内容，并在最近删除中恢复笔记。';

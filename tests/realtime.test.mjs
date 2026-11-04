@@ -25,7 +25,7 @@ async function fixture(t) {
     output = '';
     child = spawn(process.execPath, ['--import', 'tsx', 'server/index.ts'], {
       cwd: fileURLToPath(new URL('../', import.meta.url)), stdio: ['ignore', 'pipe', 'pipe'],
-      env: {...process.env, HOST: '127.0.0.1', PORT: '0', DATA_DIR: dataDir, NODE_ENV: 'test', REGISTRATION_MODE: 'open', REGISTRATION_DAILY_LIMIT: '100000', SECURE_COOKIES: 'false', PUBLIC_ORIGIN: '', TRUSTED_PROXY_IPS: ''},
+      env: {...process.env, HOST: '127.0.0.1', PORT: '0', DATA_DIR: dataDir, NODE_ENV: 'test', TEST_OPEN_REGISTRATION: 'true', REGISTRATION_DAILY_LIMIT: '100000', SECURE_COOKIES: 'false', PUBLIC_ORIGIN: '', TRUSTED_PROXY_IPS: ''},
     });
     child.stdout.on('data', chunk => { output += chunk; }); child.stderr.on('data', chunk => { output += chunk; });
     await until(() => output.match(/监听 127\.0\.0\.1:(\d+)/), '启动服务');

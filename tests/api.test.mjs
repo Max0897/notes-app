@@ -13,7 +13,7 @@ test('隔离后端 API：认证、富文本、CRUD、版本冲突、用户隔离
   const dataDir = await mkdtemp(resolve(tmpdir(), 'notes-api-'));
   const child = spawn(process.execPath, ['--import', new URL('../node_modules/tsx/dist/loader.mjs', import.meta.url).href, resolve(root, 'server/index.ts')], {
     cwd: root,
-    env: { ...process.env, DATA_DIR: dataDir, PORT: '0', HOST: '127.0.0.1', NODE_ENV: 'test', REGISTRATION_MODE: 'open', REGISTRATION_DAILY_LIMIT: '100000' },
+    env: { ...process.env, DATA_DIR: dataDir, PORT: '0', HOST: '127.0.0.1', NODE_ENV: 'test', TEST_OPEN_REGISTRATION: 'true', REGISTRATION_DAILY_LIMIT: '100000' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let output = '';

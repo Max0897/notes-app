@@ -5,13 +5,18 @@ import type {EditorBridge} from './api';
 export const pageTitles = {notifications: '通知中心', invitations: '团队邀请', settings: '团队设置', account: '账号设置', storage: '存储空间'};
 export type SettingsPage = keyof typeof pageTitles;
 export type WorkspaceView = 'notes' | SettingsPage;
-export const pageTabs = {account: ['profile', 'security', 'sessions'], settings: ['info', 'members', 'invites', 'access', 'activity'], invitations: ['incoming', 'deleted']} as const;
+export const pageTabs = {account: ['profile', 'security', 'invites', 'sessions'], settings: ['info', 'members', 'invites', 'access', 'activity'], invitations: ['incoming', 'deleted']} as const;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function linkedNote(hash: string) {
   const values = new URLSearchParams(hash.slice(1)), noteId = values.get('note'), teamId = values.get('team');
   return noteId && uuid.test(noteId) && (!teamId || uuid.test(teamId)) ? {noteId, teamId} : null;
 }
+// 注册邀请链接：/#reg=ABC234。放在片段里，不会发给服务器，也不进访问日志和 Referer。
+export function registrationInvite(hash: string) { return hash.match(/^#reg=([A-Za-z0-9]{6})$/)?.[1].toUpperCase() ?? null; }
+const inviteStorageKey = 'notes:invite';
+export const savedInvite = () => { try { return sessionStorage.getItem(inviteStorageKey) ?? ''; } catch { return ''; } };
+export const saveInvite = (code: string | null) => { try { if (code) sessionStorage.setItem(inviteStorageKey, code); else sessionStorage.removeItem(inviteStorageKey); } catch { /* Storage can be unavailable. */ } };
 export function invitationToken(hash: string) { return hash.match(/^#invite=([\w-]{43})$/)?.[1] ?? null; }
 export function workspaceTeam(search: string, hash: string, pathTeamId?: string) {
   return pathTeamId ?? (new URLSearchParams(search).get('team') || linkedNote(hash)?.teamId || null);

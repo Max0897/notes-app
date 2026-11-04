@@ -17,10 +17,8 @@ services:
     environment:
       SECURE_COOKIES: "true"
       PUBLIC_ORIGIN: "https://note.idrama.men"
-      # 注册开关：closed（默认）/ invite（凭邀请码）/ open。开放注册容易被机器人批量注册。
-      REGISTRATION_MODE: "${REGISTRATION_MODE:-closed}"
-      # invite 模式的邀请码，逗号分隔，每个 8 位以上；写在服务器的 .env 里，不要提交到仓库。
-      REGISTRATION_INVITE_CODES: "${REGISTRATION_INVITE_CODES:-}"
+      # invite 模式下每个用户每天最多邀请的人数；首个账号无需邀请码，其余账号凭已注册满 24 小时用户的个人邀请码。
+      INVITE_DAILY_LIMIT_PER_USER: "${INVITE_DAILY_LIMIT_PER_USER:-5}"
       # 全站每日（北京时间）新增账号上限。
       REGISTRATION_DAILY_LIMIT: "${REGISTRATION_DAILY_LIMIT:-20}"
     restart: always

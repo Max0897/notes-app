@@ -4,6 +4,7 @@ import {RefreshCw} from 'lucide-react';
 import {api, type User} from './api';
 import {UserAvatar} from './UserAvatar';
 import {WorkspacePage} from './WorkspacePage';
+import {InvitePanel} from './InvitePanel';
 
 export function AccountPage({user, onUserChange, onMenu, tab, onTabChange}: {user: User; onUserChange: (user: User) => void; onMenu: () => void; tab?: string; onTabChange?: (tab: string) => void}) {
   const {username} = user;
@@ -94,6 +95,9 @@ export function AccountPage({user, onUserChange, onMenu, tab, onTabChange}: {use
           <Alert type="info" content="修改密码后会退出其他设备，本设备保持登录。"/>
           <Button type="primary" htmlType="submit" loading={busy}>更新密码</Button>
         </form>
+      </Tabs.TabPane>
+      <Tabs.TabPane key="invites" title="邀请" disabled={profileBusy || busy}>
+        <InvitePanel active={tab === 'invites'}/>
       </Tabs.TabPane>
       <Tabs.TabPane key="sessions" title="登录会话" disabled={profileBusy || busy}>
         <Typography.Paragraph>{sessions === null ? '正在读取登录状态…' : `其他登录会话：${sessions} 个`}</Typography.Paragraph>

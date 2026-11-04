@@ -14,7 +14,7 @@ import {QuickSwitcher} from './QuickSwitcher';
 import {SidebarStorage} from './StorageUsage';
 import {useStorageUsage} from './storage';
 import {isValidNewUsername, USERNAME_PATTERN, USERNAME_RULE} from '../server/username';
-import {invitationToken, linkedNote, notesPath, pagePath, pageTitles, useEditorNavigationGuard, workspaceTeam, type SettingsPage, type WorkspaceView} from './navigation';
+import {invitationToken, linkedNote, notesPath, pagePath, pageTitles, registrationInvite, saveInvite, savedInvite, useEditorNavigationGuard, workspaceTeam, type SettingsPage, type WorkspaceView} from './navigation';
 
 const {Text, Title, Paragraph} = Typography;
 const AccountPage = lazy(() => import('./AccountPage').then(module => ({default: module.AccountPage})));
@@ -46,7 +46,7 @@ export function App() {
   const routeKey = useRef(routeLocation.key); routeKey.current = routeLocation.key;
   const [user, setUser] = useState<User | null>(null);
   const [boot, setBoot] = useState(true), [authMode, setAuthMode] = useState(false);
-  const [registration, setRegistration] = useState<{registration: 'closed' | 'invite' | 'open'; registrationFull: boolean} | null>(null), [inviteCode, setInviteCode] = useState('');
+  const [registration, setRegistration] = useState<{registrationFull: boolean; bootstrap: boolean} | null>(null), [inviteCode, setInviteCode] = useState(savedInvite);
   const [nickname, setNickname] = useState('');
   const [username, setUsername] = useState(''), [password, setPassword] = useState(''), [authBusy, setAuthBusy] = useState(false);
   const [notes, setNotes] = useState<Note[]>([]), [folders, setFolders] = useState<Folder[]>([]);
@@ -112,8 +112,15 @@ export function App() {
     catch (error) { Message.error((error as Error).message); }
     finally { setLoading(false); }
   }
-  useEffect(() => { api('/auth/config').then(setRegistration).catch(() => {}); }, []);
-  useEffect(() => { api('/auth/me').then(data => setUser(data.user)).catch(() => {}).finally(() => setBoot(false)); }, []);
+  useEffect(() => {
+    const code = registrationInvite(routeLocation.hash);
+    if (!code) return;
+    // 把链接里的邀请码记下来并从地址栏清掉，避免被截图或转发。
+    saveInvite(code); setInviteCode(code);
+    void navigate({pathname: routeLocation.pathname, search: routeLocation.search, hash: ''}, {replace: true});
+  }, []);
+  useEffect(() => { api('/auth/config').then(data => { setRegistration(data); if (savedInvite() && !data.registrationFull) setAuthMode(true); }).catch(() => {}); }, []);
+  useEffect(() => { api('/auth/me').then(data => { saveInvite(null); setUser(data.user); }).catch(() => {}).finally(() => setBoot(false)); }, []);
   useEffect(() => {
     if (!userId) return;
     let active = true;
@@ -188,7 +195,7 @@ export function App() {
     event.preventDefault();
     if (authMode && !isValidNewUsername(username)) { Message.warning(USERNAME_RULE); return; }
     setAuthBusy(true);
-    try { const data = await api('/auth/' + (authMode ? 'register' : 'login'), 'POST', {username, password, ...(authMode && nickname.trim() ? {nickname} : {}), ...(authMode && registration?.registration === 'invite' ? {inviteCode} : {})}); setLoading(true); setUser(data.user); setPassword(''); }
+    try { const data = await api('/auth/' + (authMode ? 'register' : 'login'), 'POST', {username, password, ...(authMode && nickname.trim() ? {nickname} : {}), ...(authMode && inviteCode ? {inviteCode} : {})}); saveInvite(null); setLoading(true); setUser(data.user); setPassword(''); }
     catch (error) { Message.error((error as Error).message); }
     finally { setAuthBusy(false); }
   }
@@ -458,14 +465,14 @@ export function App() {
         value={username} onChange={setUsername} placeholder={authMode ? '例如 notes_2026' : '请输入用户名'} maxLength={32}
         pattern={authMode ? USERNAME_PATTERN : undefined} aria-describedby={authMode ? 'auth-username-rule' : undefined}/>
       {authMode && <Text id="auth-username-rule" type="secondary">{USERNAME_RULE}</Text>}
-      {authMode && registration?.registration === 'invite' && <Input aria-label="邀请码" autoComplete="off" value={inviteCode} onChange={setInviteCode} placeholder="邀请码" maxLength={128}/>}
+      {authMode && <Input aria-label="邀请码" autoComplete="off" value={inviteCode} onChange={value => setInviteCode(value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6))} placeholder={registration?.bootstrap ? '邀请码（首个账号无需填写）' : '邀请码（6 位）'} maxLength={6}/>}
       {authMode && <Input aria-label="注册昵称" autoComplete="nickname" value={nickname} onChange={setNickname} placeholder="昵称（选填，默认使用用户名）" maxLength={64}/>}
       <label htmlFor="auth-password"><Text type="secondary">密码</Text></label>
       <Input.Password id="auth-password" autoComplete={authMode ? 'new-password' : 'current-password'} value={password} onChange={setPassword} placeholder="至少 8 个字符" maxLength={128}/>
       <Button className="auth-submit" type="primary" long htmlType="submit" loading={authBusy}>{authMode ? '创建账号' : '登录'}</Button>
     </form>
-    {registration && registration.registration !== 'closed' && !registration.registrationFull ? <div className="auth-switch"><Text type="secondary">{authMode ? '已有账号？' : '还没有账号？'}</Text><Button type="text" size="small" onClick={() => setAuthMode(!authMode)}>{authMode ? '去登录' : '创建账号'}</Button></div>
-      : <div className="auth-switch"><Text type="secondary">{registration?.registrationFull ? '今日注册名额已满，请明天再来' : '当前未开放注册'}</Text></div>}
+    {registration && !registration.registrationFull ? <div className="auth-switch"><Text type="secondary">{authMode ? '已有账号？' : '还没有账号？'}</Text><Button type="text" size="small" onClick={() => setAuthMode(!authMode)}>{authMode ? '去登录' : '创建账号'}</Button></div>
+      : registration && <div className="auth-switch"><Text type="secondary">今日注册名额已满，请明天再来</Text></div>}
   </Card></div>;
 
   if (teamId !== routeTeamId || routeTeamId && (!spacesLoaded || !currentTeam)) return <div className="boot">{spacesError

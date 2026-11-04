@@ -15,7 +15,7 @@ async function fixture(t, env = {}, prepare) {
   if (prepare) await prepare(dataDir);
   const child = spawn(process.execPath, ['--import', new URL('../node_modules/tsx/dist/loader.mjs', import.meta.url).href, fileURLToPath(new URL('../server/index.ts', import.meta.url))], {
     cwd: root, stdio: ['ignore', 'pipe', 'pipe'],
-    env: {...process.env, HOST: '127.0.0.1', PORT: '0', DATA_DIR: dataDir, NODE_ENV: 'test', REGISTRATION_MODE: 'open', REGISTRATION_DAILY_LIMIT: '100000', SECURE_COOKIES: 'false', PUBLIC_ORIGIN: '', TRUSTED_PROXY_IPS: '', ...env},
+    env: {...process.env, HOST: '127.0.0.1', PORT: '0', DATA_DIR: dataDir, NODE_ENV: 'test', TEST_OPEN_REGISTRATION: 'true', REGISTRATION_DAILY_LIMIT: '100000', SECURE_COOKIES: 'false', PUBLIC_ORIGIN: '', TRUSTED_PROXY_IPS: '', ...env},
   });
   let output = '';
   child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
@@ -350,7 +350,7 @@ test('事件与生命周期：可见编辑状态、成员撤销、解散校验�
   db.prepare('UPDATE teams SET deleted_at=? WHERE id=?').run(new Date(Date.now() - 31 * 86400000).toISOString(), team.id); db.close();
   await stop();
   // 重启同一数据目录，触发到期清理。
-  const child = spawn(process.execPath, ['--import', new URL('../node_modules/tsx/dist/loader.mjs', import.meta.url).href, fileURLToPath(new URL('../server/index.ts', import.meta.url))], {cwd: new URL('../', import.meta.url), env: {...process.env, HOST: '127.0.0.1', PORT: '0', DATA_DIR: dataDir, NODE_ENV: 'test', REGISTRATION_MODE: 'open', REGISTRATION_DAILY_LIMIT: '100000', SECURE_COOKIES: 'false', PUBLIC_ORIGIN: '', TRUSTED_PROXY_IPS: ''}, stdio: ['ignore', 'pipe', 'pipe']});
+  const child = spawn(process.execPath, ['--import', new URL('../node_modules/tsx/dist/loader.mjs', import.meta.url).href, fileURLToPath(new URL('../server/index.ts', import.meta.url))], {cwd: new URL('../', import.meta.url), env: {...process.env, HOST: '127.0.0.1', PORT: '0', DATA_DIR: dataDir, NODE_ENV: 'test', TEST_OPEN_REGISTRATION: 'true', REGISTRATION_DAILY_LIMIT: '100000', SECURE_COOKIES: 'false', PUBLIC_ORIGIN: '', TRUSTED_PROXY_IPS: ''}, stdio: ['ignore', 'pipe', 'pipe']});
   cleanups.push(async () => { if (child.exitCode === null) { const stopped = once(child, 'exit'); child.kill(); await stopped; } });
   await new Promise((resolve, reject) => { const timer = setTimeout(() => reject(new Error('清理重启超时')), 10000); child.stdout.on('data', d => { if (String(d).includes('监听')) { clearTimeout(timer); resolve(); } }); child.stderr.on('data', d => t.diagnostic(String(d))); });
   const check = new Database(resolve(dataDir, 'notes.sqlite'));

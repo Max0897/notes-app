@@ -16,7 +16,7 @@ async function fixture(t, env = {}, prepare) {
   if (prepare) await prepare(dataDir);
   const child = spawn(process.execPath, ['--import', new URL('../node_modules/tsx/dist/loader.mjs', import.meta.url).href, fileURLToPath(new URL('../server/index.ts', import.meta.url))], {
     cwd: root, stdio: ['ignore', 'pipe', 'pipe'],
-    env: {...process.env, HOST: '127.0.0.1', PORT: '0', DATA_DIR: dataDir, NODE_ENV: 'test', REGISTRATION_MODE: 'open', REGISTRATION_DAILY_LIMIT: '100000', SECURE_COOKIES: 'false', PUBLIC_ORIGIN: '', TRUSTED_PROXY_IPS: '', ...env},
+    env: {...process.env, HOST: '127.0.0.1', PORT: '0', DATA_DIR: dataDir, NODE_ENV: 'test', TEST_OPEN_REGISTRATION: 'true', REGISTRATION_DAILY_LIMIT: '100000', SECURE_COOKIES: 'false', PUBLIC_ORIGIN: '', TRUSTED_PROXY_IPS: '', ...env},
   });
   let output = '';
   child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
