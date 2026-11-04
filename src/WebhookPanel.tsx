@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useState} from 'react';
-import {Button, Checkbox, Empty, Input, Message, Modal, Popconfirm, Select, Switch, Tag, Typography} from '@arco-design/web-react';
-import {Plus, Send} from 'lucide-react';
+import {Button, Checkbox, Dropdown, Empty, Input, Menu, Message, Modal, Select, Tag, Typography} from '@arco-design/web-react';
+import {MoreHorizontal, Plus, Send} from 'lucide-react';
 import {api} from './api';
 import {ROBOTS, type RobotType} from '../server/robotTypes';
 
@@ -44,6 +44,15 @@ export function WebhookPanel({active}: {active: boolean}) {
     else Message.error('测试推送失败：' + (data.error ?? '未知错误'));
   });
   const showRecords = (hook: Webhook) => act(async () => { setRecords({hook, items: (await api('/webhooks/' + hook.id + '/deliveries')).deliveries}); });
+  function moreAction(hook: Webhook, key: string) {
+    if (key === 'records') void showRecords(hook);
+    else if (key === 'edit') edit(hook);
+    else if (key === 'toggle') void act(async () => { await api('/webhooks/' + hook.id, 'PATCH', {enabled: !hook.enabled}); });
+    else if (key === 'delete') Modal.confirm({
+      title: '删除这个机器人？', content: '其下的推送计划会一并删除。', okText: '删除', cancelText: '取消', okButtonProps: {status: 'danger'},
+      onOk: () => act(async () => { await api('/webhooks/' + hook.id, 'DELETE'); }),
+    });
+  }
   const edit = (hook: Webhook) => setForm({id: hook.id, type: hook.type, name: hook.name, url: hook.url, secret: '', keyword: hook.keyword, clearSecret: false, hasSecret: hook.hasSecret});
 
   if (!hooks) return <Paragraph type="secondary">正在读取机器人…</Paragraph>;
@@ -64,13 +73,15 @@ export function WebhookPanel({active}: {active: boolean}) {
           </div>
         </div>
         <div className="webhook-item-actions">
-          <Switch size="small" checked={hook.enabled} disabled={busy} aria-label={hook.enabled ? '停用机器人' : '启用机器人'} onChange={enabled => void act(async () => { await api('/webhooks/' + hook.id, 'PATCH', {enabled}); })}/>
           <Button size="mini" icon={<Send size={14}/>} disabled={busy} onClick={() => void test(hook)}>测试</Button>
-          <Button size="mini" disabled={busy} onClick={() => void showRecords(hook)}>记录</Button>
-          <Button size="mini" disabled={busy} onClick={() => edit(hook)}>编辑</Button>
-          <Popconfirm title="删除这个机器人？" content="其下的推送计划会一并删除。" onOk={() => act(async () => { await api('/webhooks/' + hook.id, 'DELETE'); })}>
-            <Button size="mini" status="danger" disabled={busy}>删除</Button>
-          </Popconfirm>
+          <Dropdown trigger="click" position="br" droplist={<Menu onClickMenuItem={key => moreAction(hook, String(key))}>
+            <Menu.Item key="records">推送记录</Menu.Item>
+            <Menu.Item key="edit">编辑</Menu.Item>
+            <Menu.Item key="toggle">{hook.enabled ? '停用' : '启用'}</Menu.Item>
+            <Menu.Item key="delete" className="note-menu-danger">删除</Menu.Item>
+          </Menu>}>
+            <Button size="mini" icon={<MoreHorizontal size={14}/>} disabled={busy} aria-label={`${hook.name} 更多操作`}>更多</Button>
+          </Dropdown>
         </div>
       </div>)}
     </div>}
