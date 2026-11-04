@@ -150,7 +150,7 @@ test('头像：认证、配置校验、用户隔离、多会话与重新登录�
   await request('/auth/avatar', {method: 'PATCH', body: config, status: 401});
   await request('/auth/avatar', {method: 'PATCH', cookie: first.cookie, body: config, headers: {Origin: 'https://evil.example'}, status: 403});
   for (const body of [
-    {...config, avatarStyle: 'unsupported'}, {...config, avatarStyle: 'lorelei'}, {...config, avatarStyle: {}},
+    {...config, avatarStyle: 'unsupported'}, {...config, avatarStyle: 'bottts'}, {...config, avatarStyle: 'Lorelei'}, {...config, avatarStyle: {}},
     {...config, avatarSeed: ''}, {...config, avatarSeed: 'x'.repeat(81)},
     {...config, avatarSeed: '<svg onload=alert(1)>'}, {...config, avatarSeed: 'https://example.com/avatar'},
     {...config, userId: other.json.user.id}, {avatarStyle: 'cutouts'}, {avatarSeed: 'test'},
@@ -160,6 +160,11 @@ test('头像：认证、配置校验、用户隔离、多会话与重新登录�
   assert.deepEqual(changed, {...user, ...config});
   assert.deepEqual((await request('/auth/me', {cookie: second})).json.user, changed);
   assert.deepEqual((await request('/auth/me', {cookie: other.cookie})).json.user, other.json.user);
+  const styled = {avatarStyle: 'lorelei', avatarSeed: 'avatar-style-2026'};
+  assert.deepEqual((await request('/auth/avatar', {method: 'PATCH', cookie: first.cookie, body: styled})).json.user, {...user, ...styled});
+  assert.deepEqual((await request('/auth/me', {cookie: second})).json.user, {...user, ...styled});
+  assert.deepEqual((await request('/auth/me', {cookie: other.cookie})).json.user, other.json.user);
+  await request('/auth/avatar', {method: 'PATCH', cookie: first.cookie, body: config});
   const fresh = await login('avatar_a');
   assert.deepEqual(fresh.json.user, {...user, ...config, avatarStyle: 'cutouts'});
   assert.equal((await request('/auth/sessions', {cookie: first.cookie})).json.otherSessions, 2);

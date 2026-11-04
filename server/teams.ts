@@ -232,7 +232,7 @@ export function registerCollaboration(app: Hono<AppEnv>, db: Database.Database, 
   });
   app.get('/api/teams/:teamId/members', c => {
     const t = team(c);
-    const members = db.prepare(`SELECT u.id,u.username,COALESCE(NULLIF(u.nickname,''),u.username) AS nickname,'cutouts' AS avatarStyle,COALESCE(a.seed,u.id) AS avatarSeed,m.role,m.joined_at AS joinedAt
+    const members = db.prepare(`SELECT u.id,u.username,COALESCE(NULLIF(u.nickname,''),u.username) AS nickname,COALESCE(a.style,'cutouts') AS avatarStyle,COALESCE(a.seed,u.id) AS avatarSeed,m.role,m.joined_at AS joinedAt
       FROM team_members m JOIN users u ON u.id=m.user_id LEFT JOIN user_avatars a ON a.user_id=u.id WHERE m.team_id=? ORDER BY m.joined_at`).all(t.id);
     return c.json({members});
   });

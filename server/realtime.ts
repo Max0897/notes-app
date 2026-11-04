@@ -19,7 +19,7 @@ import * as decoding from 'lib0/decoding';
 import type Database from 'better-sqlite3';
 import {EDITOR_CAPABILITY} from './editorVersion.js';
 
-type User = {id: string; username: string; nickname: string; avatarStyle: 'cutouts'; avatarSeed: string};
+type User = {id: string; username: string; nickname: string; avatarStyle: string; avatarSeed: string};
 type Identity = {user: User; sessionHash: string; clientId?: number; color?: string; count?: number; until?: number};
 type Row = Record<string, any>;
 const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
@@ -50,7 +50,7 @@ export function createRealtime(db: Database.Database, options: {
     const token = cookie?.split(';').map(part => part.trim()).find(part => part.startsWith(options.cookieName + '='))?.slice(options.cookieName.length + 1);
     if (!token || !/^[A-Za-z0-9_-]{43}$/.test(token)) denied('登录已失效，请重新登录');
     const sessionHash = createHash('sha256').update(token).digest('hex');
-    const user = db.prepare(`SELECT u.id,u.username,COALESCE(NULLIF(u.nickname,''),u.username) AS nickname,'cutouts' AS avatarStyle,COALESCE(a.seed,u.id) AS avatarSeed
+    const user = db.prepare(`SELECT u.id,u.username,COALESCE(NULLIF(u.nickname,''),u.username) AS nickname,COALESCE(a.style,'cutouts') AS avatarStyle,COALESCE(a.seed,u.id) AS avatarSeed
       FROM sessions s JOIN users u ON u.id=s.user_id LEFT JOIN user_avatars a ON a.user_id=u.id
       WHERE s.token_hash=? AND s.expires_at>?`).get(sessionHash, Date.now()) as User | undefined;
     if (!user) denied('登录已失效，请重新登录');
@@ -139,7 +139,7 @@ export function createRealtime(db: Database.Database, options: {
     for (const document of instance.documents.values()) for (const connection of document.getConnections() as Connection<Identity>[]) {
       try {
         const permission = access(document.name, connection.context);
-        const profile = db.prepare("SELECT u.id,u.username,COALESCE(NULLIF(u.nickname,''),u.username) AS nickname,'cutouts' AS avatarStyle,COALESCE(a.seed,u.id) AS avatarSeed FROM users u LEFT JOIN user_avatars a ON a.user_id=u.id WHERE u.id=?").get(connection.context.user.id) as User;
+        const profile = db.prepare("SELECT u.id,u.username,COALESCE(NULLIF(u.nickname,''),u.username) AS nickname,COALESCE(a.style,'cutouts') AS avatarStyle,COALESCE(a.seed,u.id) AS avatarSeed FROM users u LEFT JOIN user_avatars a ON a.user_id=u.id WHERE u.id=?").get(connection.context.user.id) as User;
         if (JSON.stringify(profile) !== JSON.stringify(connection.context.user)) {
           connection.context.user = profile;
           connection.sendStateless(JSON.stringify({type: 'ready', user: identityInfo(connection.context), canEdit: permission.canEdit}));

@@ -2,7 +2,8 @@ import {EDITOR_CAPABILITY} from '../server/editorVersion.js';
 
 export type Note = { id: string; title: string; content: any; plainText: string; folderId: string | null; pinned: boolean; deletedAt: string | null; version: number; createdAt: string; updatedAt: string; canEdit?: boolean; canManage?: boolean; modifiedBy?: string };
 export type Folder = { id: string; name: string; canEdit?: boolean; restricted?: boolean; deletedAt?: string | null };
-export type AvatarStyle = 'cutouts';
+export type {AvatarStyle} from '../server/avatarStyles.js';
+import type {AvatarStyle} from '../server/avatarStyles.js';
 export type User = { id: string; username: string; nickname: string; avatarStyle: AvatarStyle; avatarSeed: string };
 export const displayName = (user: {username: string; nickname?: string}) => user.nickname || user.username;
 export type EditorBridge = { flush: () => Promise<boolean>; snapshot: () => Note; hasChanges: () => boolean; draft: () => string; command?: (action: 'find' | 'outline' | 'focus') => void };

@@ -110,7 +110,7 @@ export function registerNotebook(app: Hono<AppEnv>, db: Database.Database, deps:
     app.get(prefix + '/:id/comment-members', c => {
       const row = note(c);
       if (row.space_id === row.user_id) return c.json({members: []});
-      const members = db.prepare("SELECT u.id,u.username,COALESCE(NULLIF(u.nickname,''),u.username) AS nickname,'cutouts' AS avatarStyle,COALESCE(a.seed,u.id) AS avatarSeed FROM team_members m JOIN users u ON u.id=m.user_id LEFT JOIN user_avatars a ON a.user_id=u.id WHERE m.team_id=? ORDER BY u.username").all(row.space_id) as Row[];
+      const members = db.prepare("SELECT u.id,u.username,COALESCE(NULLIF(u.nickname,''),u.username) AS nickname,COALESCE(a.style,'cutouts') AS avatarStyle,COALESCE(a.seed,u.id) AS avatarSeed FROM team_members m JOIN users u ON u.id=m.user_id LEFT JOIN user_avatars a ON a.user_id=u.id WHERE m.team_id=? ORDER BY u.username").all(row.space_id) as Row[];
       return c.json({members: members.filter(member => { try { permission(member.id, row.space_id, row.folder_id); return true; } catch { return false; } })});
     });
     app.get(prefix + '/:id/comments', c => {
@@ -119,7 +119,7 @@ export function registerNotebook(app: Hono<AppEnv>, db: Database.Database, deps:
       const before = c.req.query('before') ?? '9999-12-31T23:59:59.999Z', [beforeTime, beforeId] = before.split('|');
       if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(beforeTime) || beforeId !== undefined && !uuid.test(beforeId)) fail(400, '评论分页位置无效');
       const rows = db.prepare(`SELECT c.id,c.body,c.mentions,c.mention_ranges AS mentionRanges,c.user_id AS userId,c.created_at AS createdAt,c.thread_id AS threadId,
-        u.username,COALESCE(NULLIF(u.nickname,''),u.username) AS nickname,'cutouts' AS avatarStyle,COALESCE(a.seed,u.id) AS avatarSeed,
+        u.username,COALESCE(NULLIF(u.nickname,''),u.username) AS nickname,COALESCE(a.style,'cutouts') AS avatarStyle,COALESCE(a.seed,u.id) AS avatarSeed,
         r.id AS replyToId,ru.id AS replyToUserId,ru.username AS replyToUsername,COALESCE(NULLIF(ru.nickname,''),ru.username) AS replyToNickname,
         (SELECT COUNT(*) FROM note_comments replies WHERE replies.thread_id=c.id AND replies.note_id=c.note_id) AS replyCount
         FROM note_comments c JOIN users u ON u.id=c.user_id LEFT JOIN user_avatars a ON a.user_id=u.id

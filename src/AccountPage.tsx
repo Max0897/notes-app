@@ -5,14 +5,14 @@ import {api, type User} from './api';
 import {UserAvatar} from './UserAvatar';
 import {WorkspacePage} from './WorkspacePage';
 import {InvitePanel} from './InvitePanel';
+import {AvatarModal} from './AvatarModal';
 
 export function AccountPage({user, onUserChange, onMenu, tab, onTabChange}: {user: User; onUserChange: (user: User) => void; onMenu: () => void; tab?: string; onTabChange?: (tab: string) => void}) {
   const {username} = user;
   const [nickname, setNickname] = useState(user.nickname || username);
   const [profileBusy, setProfileBusy] = useState(false);
-  const [avatarSeed, setAvatarSeed] = useState(user.avatarSeed);
-  const avatarChanged = avatarSeed !== user.avatarSeed;
-  const profileChanged = nickname.trim() !== user.nickname || avatarChanged;
+  const [avatarOpen, setAvatarOpen] = useState(false);
+  const profileChanged = nickname.trim() !== user.nickname;
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -33,10 +33,6 @@ export function AccountPage({user, onUserChange, onMenu, tab, onTabChange}: {use
       if (nickname.trim() !== user.nickname) {
         const data = await api('/auth/profile', 'PATCH', {nickname});
         onUserChange(data.user); setNickname(data.user.nickname);
-      }
-      if (avatarChanged) {
-        const data = await api('/auth/avatar', 'PATCH', {avatarStyle: 'cutouts', avatarSeed});
-        onUserChange(data.user);
       }
       Message.success('个人资料已保存');
     } catch (error) { Message.error((error as Error).message); }
@@ -68,8 +64,9 @@ export function AccountPage({user, onUserChange, onMenu, tab, onTabChange}: {use
           <div className="account-form-field" role="group" aria-labelledby="profile-avatar-label">
             <span className="account-form-label" id="profile-avatar-label">头像</span>
             <div className="avatar-settings">
-              <UserAvatar user={{...user, avatarSeed}} size={72} label="头像预览"/>
-              <Button htmlType="button" icon={<RefreshCw size={16}/>} disabled={profileBusy} onClick={() => setAvatarSeed(crypto.randomUUID())}>换一个</Button>
+              <UserAvatar user={user} size={72} label="当前头像"/>
+              <Button htmlType="button" icon={<RefreshCw size={16}/>} disabled={profileBusy} onClick={() => setAvatarOpen(true)}>更换头像</Button>
+              <AvatarModal visible={avatarOpen} user={user} onClose={() => setAvatarOpen(false)} onSaved={onUserChange}/>
             </div>
           </div>
           <div className="account-form-field">

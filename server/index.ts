@@ -17,6 +17,7 @@ import {createRealtime} from './realtime.js';
 import {initNotebook, registerNotebook} from './notebook.js';
 import {initImages, isImageUpload, MAX_IMAGE_BYTES} from './images.js';
 import {isValidNewUsername, USERNAME_RULE} from './username.js';
+import {isAvatarStyle} from './avatarStyles.js';
 import {EDITOR_CAPABILITY, needsCurrentEditor} from './editorVersion.js';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -386,7 +387,7 @@ function noteFromRow(row: NoteRow): Note {
 const selectNote = db.prepare('SELECT * FROM notes WHERE id = ? AND user_id = ? AND space_id = user_id');
 // 独立配置表兼容现有数据库；旧账号无需改写即可得到稳定的默认头像。
 const publicUserColumns = `users.id, users.username, COALESCE(NULLIF(users.nickname,''),users.username) AS nickname,
-  'cutouts' AS avatarStyle,
+  COALESCE(user_avatars.style, 'cutouts') AS avatarStyle,
   COALESCE(user_avatars.seed, users.id) AS avatarSeed`;
 function publicUser(id: string): User {
   return db.prepare(`SELECT ${publicUserColumns} FROM users
@@ -662,7 +663,7 @@ app.patch('/api/auth/profile', requireAuth, async c => {
 });
 app.patch('/api/auth/avatar', requireAuth, async c => {
   const body = await readBody(c, ['avatarStyle', 'avatarSeed']);
-  if (body.avatarStyle !== 'cutouts') invalid('头像仅支持 Cutouts 风格');
+  if (!isAvatarStyle(body.avatarStyle)) invalid('不支持的头像风格');
   if (typeof body.avatarSeed !== 'string' || !/^[a-zA-Z0-9_-]{1,80}$/.test(body.avatarSeed)) invalid('头像标识须为 1 至 80 位字母、数字、下划线或连字符');
   requireLiveSession(c);
   const userId = c.get('user')!.id;
