@@ -147,7 +147,12 @@ test('评论回复：同一讨论串、回复通知去重、权限隔离与删�
   const nested = replies.find(item => item.body === '回复楼中楼');
   assert.equal(nested.threadId, root.id); assert.equal(nested.replyTo.id, first.id); assert.equal(nested.replyTo.nickname, f.editor.user.nickname);
   assert.ok((await f.request(f.editor, '/notifications')).notifications.some(item => item.kind === 'note_comment_reply' && item.noteId === note.id));
-  assert.equal((await f.request(f.owner, path + '/comments')).comments[0].replyCount, 2);
+  const top = (await f.request(f.owner, path + '/comments')).comments[0];
+  assert.equal(top.replyCount, 2);
+  // 顶层评论附带最近的回复，按时间正序；回复列表本身不再嵌套。
+  assert.deepEqual(top.recentReplies.map(item => item.body), [reply.body, '回复楼中楼']);
+  assert.equal(top.recentReplies[1].replyTo.id, first.id);
+  assert.equal('recentReplies' in replies[0], false);
   await f.request(f.viewer, path + '/comments', 'POST', reply, 403);
   await f.request(f.outsider, path + '/comments?threadId=' + root.id, 'GET', undefined, 404);
   await f.request(f.owner, path + '/comments?threadId=' + first.id, 'GET', undefined, 404);
@@ -316,4 +321,28 @@ test('恢复草稿时已降级为查看者：保留草稿、停止上传，不�
   assert.equal(restored.hasChanges(), true); assert.ok(storage.length); assert.equal(restored.state.synced, true);
   assert.ok(!(await f.request(f.owner, f.base + '/notes/' + note.id)).note.title.includes('失去权限'));
   restored.discardDraft(); assert.equal(storage.length, 0); assert.equal(restored.hasChanges(), false);
+});
+
+test('评论未读：未读数、已读位置只前进、自己发的不算未读', async t => {
+  const f = await fixture(t), {note} = await f.request(f.owner, f.base + '/notes', 'POST', {folderId: null}, 201), path = f.base + '/notes/' + note.id;
+  await f.request(f.editor, path + '/comments', 'POST', {body: '第一条', mentions: []}, 201);
+  const mine = (await f.request(f.editor, path + '/comments')).comments[0];
+  assert.equal((await f.request(f.owner, path + '/comments')).total, 1);
+
+  // 未读：他人发布且晚于已读位置的评论；自己发的不算。
+  assert.deepEqual((await f.request(f.owner, f.base + '/comment-stats')).stats, [{noteId: note.id, commentCount: 1, unreadComments: 1}]);
+  assert.deepEqual((await f.request(f.editor, f.base + '/comment-stats')).stats, [{noteId: note.id, commentCount: 1, unreadComments: 0}]);
+  const listed = (await f.request(f.owner, f.base + '/notes')).notes.find(item => item.id === note.id);
+  assert.equal(listed.commentCount, 1); assert.equal(listed.unreadComments, 1);
+  await f.request(f.owner, path + '/comments/read', 'POST', {upTo: 'yesterday'}, 400);
+  await f.request(f.owner, path + '/comments/read', 'POST', {}, 400);
+  const read = await f.request(f.owner, path + '/comments/read', 'POST', {upTo: mine.createdAt});
+  assert.equal(read.total, 1); assert.equal(read.unread, 0);
+  await f.request(f.outsider, path + '/comments/read', 'POST', {upTo: mine.createdAt}, 404);
+  await f.request(f.editor, path + '/comments', 'POST', {body: '第二条', mentions: []}, 201);
+  assert.equal((await f.request(f.owner, f.base + '/comment-stats')).stats[0].unreadComments, 1);
+  assert.equal((await f.request(f.owner, path + '/comments/read', 'POST', {upTo: mine.createdAt})).unread, 1, '已读位置只前进到指定时间');
+  const newest = (await f.request(f.owner, path + '/comments')).comments[0];
+  assert.equal((await f.request(f.owner, path + '/comments/read', 'POST', {upTo: newest.createdAt})).unread, 0);
+  assert.equal((await f.request(f.owner, path + '/comments/read', 'POST', {upTo: mine.createdAt})).unread, 0, '已读位置不会后退');
 });

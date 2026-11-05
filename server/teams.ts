@@ -5,6 +5,7 @@ import {streamSSE} from 'hono/streaming';
 import type {AppContext, AppEnv, JsonObject} from './index.js';
 import {invitationLinkTokens} from './invitationLinks.js';
 import {EDITOR_CAPABILITY, needsCurrentEditor} from './editorVersion.js';
+import {commentStats} from './notebook.js';
 
 const retention = 30 * 86400000;
 type Role = 'owner' | 'admin' | 'editor' | 'viewer';
@@ -155,11 +156,13 @@ export function registerCollaboration(app: Hono<AppEnv>, db: Database.Database, 
     if (!n) fail(404, '备忘录不存在');
     access(c, t, n.folder_id, edit); return n;
   }
+  function commentCounts(userId: string, noteId: string) { const stats = commentStats(db, userId, noteId); return {commentCount: stats.total, unreadComments: stats.unread}; }
   function noteDto(c: AppContext, t: Row & {role: Role}, n: Row) {
     const user = db.prepare("SELECT COALESCE(NULLIF(nickname,''),username) AS username FROM users WHERE id=?").get(n.updated_by ?? n.user_id) as Row;
     return {id: n.id, title: n.title, content: JSON.parse(n.content), plainText: n.plain_text, folderId: n.folder_id,
       pinned: !!n.pinned, deletedAt: n.deleted_at, version: n.version, createdAt: n.created_at, updatedAt: n.updated_at,
-      canEdit: can(c, t, n.folder_id, true) && !folder(t, n.folder_id)?.deleted_at, canManage: manager(t.role), modifiedBy: user?.username ?? '团队成员'};
+      canEdit: can(c, t, n.folder_id, true) && !folder(t, n.folder_id)?.deleted_at, canManage: manager(t.role), modifiedBy: user?.username ?? '团队成员',
+      ...commentCounts(c.get('user')!.id, n.id)};
   }
   function version(value: unknown, row: Row) { if (!Number.isSafeInteger(value) || Number(value) < 1) fail(400, '缺少有效版本'); if (value !== row.version) fail(409, '资料已被更新，请刷新后重试'); }
   // 名称拒绝控制字符，避免在名称及日志中插入不可见内容。
@@ -438,6 +441,15 @@ export function registerCollaboration(app: Hono<AppEnv>, db: Database.Database, 
   app.get('/api/teams/:teamId/notes', c => {
     const t = team(c), rows = db.prepare('SELECT * FROM notes WHERE space_id=? ORDER BY updated_at DESC,id').all(t.id) as Row[];
     return c.json({notes: rows.filter(n => can(c, t, n.folder_id)).map(n => noteDto(c, t, n))});
+  });
+  // 轻量接口：返回有评论的备忘录的评论数与未读数，客户端定时刷新列表上的评论角标。
+  app.get('/api/teams/:teamId/comment-stats', c => {
+    const t = team(c), userId = c.get('user')!.id;
+    const rows = db.prepare(`SELECT n.id,n.folder_id,COUNT(*) AS total,
+      COALESCE(SUM(CASE WHEN k.user_id!=@user AND k.created_at>MAX(COALESCE(r.read_at,''),(SELECT value FROM note_comment_meta WHERE key='reads_since')) THEN 1 ELSE 0 END),0) AS unread
+      FROM notes n JOIN note_comments k ON k.note_id=n.id LEFT JOIN note_comment_reads r ON r.note_id=n.id AND r.user_id=@user
+      WHERE n.space_id=@space AND n.deleted_at IS NULL GROUP BY n.id`).all({user: userId, space: t.id}) as Row[];
+    return c.json({stats: rows.filter(n => can(c, t, n.folder_id)).map(n => ({noteId: n.id, commentCount: n.total, unreadComments: n.unread}))});
   });
   app.get('/api/teams/:teamId/notes/:id', c => { const t = team(c); return c.json({note: noteDto(c, t, note(c, t, c.req.param('id')))}); });
   app.post('/api/teams/:teamId/notes', async c => {

@@ -133,6 +133,25 @@ export function App() {
     window.addEventListener('focus', refresh); window.addEventListener('notifications:refresh', changed);
     return () => { active = false; clearInterval(timer); clearTimeout(pending); window.removeEventListener('focus', refresh); window.removeEventListener('notifications:refresh', changed); };
   }, [userId]);
+  // 团队空间里定时刷新列表上的评论数和未读数。
+  useEffect(() => {
+    if (!userId || !teamId || view !== 'notes') return;
+    let active = true; const id = teamId;
+    const refresh = () => {
+      if (document.visibilityState !== 'visible') return;
+      void api('/teams/' + id + '/comment-stats').then(data => {
+        if (!active || workspace.current !== id) return;
+        const stats = new Map<string, {commentCount: number; unreadComments: number}>(data.stats.map((item: {noteId: string; commentCount: number; unreadComments: number}) => [item.noteId, item]));
+        setNotes(items => items.map(item => {
+          const next = {commentCount: stats.get(item.id)?.commentCount ?? 0, unreadComments: stats.get(item.id)?.unreadComments ?? 0};
+          return item.commentCount === next.commentCount && item.unreadComments === next.unreadComments ? item : {...item, ...next};
+        }));
+      }).catch(() => {});
+    };
+    const timer = setInterval(refresh, 30000);
+    window.addEventListener('focus', refresh);
+    return () => { active = false; clearInterval(timer); window.removeEventListener('focus', refresh); };
+  }, [userId, teamId, view]);
   useEffect(() => { if (userId) void loadSpaces().catch(error => Message.error(error.message)); }, [userId]);
   useEffect(() => {
     if (!userId) return;
@@ -578,7 +597,7 @@ export function App() {
               style={checked.includes(note.id) || selected === note.id ? {borderColor: 'rgb(var(--primary-6))', background: 'rgb(var(--primary-1))'} : undefined}
               onClick={() => openNote(note)}>
               <div className="note-card-row"><span onClick={event => event.stopPropagation()}><Checkbox aria-label={'选择笔记：' + (note.title || '新备忘录')} checked={checked.includes(note.id)} disabled={batchBusy || note.canEdit === false} onChange={() => toggleChecked(note.id)}/></span>
-                <div className="note-card-content" tabIndex={0} role="button" aria-label={'打开笔记：' + (note.title || '新备忘录')} onKeyDown={event => cardKey(event, note)}><div className="note-card-head"><Text className="note-card-title" style={{fontWeight: 600}}><Highlight text={note.title || '新备忘录'} query={search}/></Text>{note.pinned && <Tag size="small" color="gold">置顶</Tag>}</div>
+                <div className="note-card-content" tabIndex={0} role="button" aria-label={'打开笔记：' + (note.title || '新备忘录')} onKeyDown={event => cardKey(event, note)}><div className="note-card-head"><Text className="note-card-title" style={{fontWeight: 600}}><Highlight text={note.title || '新备忘录'} query={search}/></Text>{note.pinned && <Tag size="small" color="gold">置顶</Tag>}{(note.commentCount ?? 0) > 0 && <span className="note-card-comments" title={`${note.commentCount} 条评论` + ((note.unreadComments ?? 0) > 0 ? `，${note.unreadComments} 条未读` : '')}><MessageSquare size={12}/>{note.commentCount}{(note.unreadComments ?? 0) > 0 && <i className="unread-dot" aria-label="有未读评论"/>}</span>}</div>
                   <Text type="secondary" className="note-card-desc">{date(note.updatedAt)} · <Highlight text={snippet(note.plainText, search) || '暂无内容'} query={search}/></Text>
                 </div>
                 <span onClick={event => event.stopPropagation()}><Dropdown trigger="click" position="br" droplist={noteMenu(note)}><Button className="note-touch-more" aria-label={'笔记操作：' + (note.title || '新备忘录')} type="text" size="mini" disabled={batchBusy} icon={<MoreHorizontal size={16}/>}/></Dropdown></span>
@@ -588,7 +607,7 @@ export function App() {
         </Spin>
       </div>
     </section>
-    <main className="editor-pane">{current ? <>
+    <main className={'editor-pane' + (activity ? ' has-activity' : '')}>{current ? <>
       <div className="editor-header"><Space size={4}>
         <Tooltip content="返回列表"><Button className="back" type="text" size="small" aria-label="返回列表" icon={<ArrowLeft size={16}/>} onClick={() => void safeSwitch(() => setMobile(false))}/></Tooltip>
         <Text className="editor-folder-name" type="secondary">{current.deletedAt ? '最近删除' : folders.find(folder => folder.id === current.folderId)?.name || '未分类'}</Text>
@@ -611,16 +630,16 @@ export function App() {
           {!current.deletedAt && <Menu.Item key="pin" disabled={current.canEdit === false}><Ico Icon={Star} text={current.pinned ? '取消置顶' : '置顶'}/></Menu.Item>}
           {!current.deletedAt && folderMoveMenu(writableFolders, current.folderId, current.canEdit === false)}
           {!current.deletedAt && <Menu.Item key="history"><Ico Icon={History} text="历史版本"/></Menu.Item>}
-          {!current.deletedAt && teamId && <Menu.Item key="comments"><Ico Icon={MessageSquare} text="评论"/></Menu.Item>}
+          {!current.deletedAt && teamId && <Menu.Item key="comments"><span className="ico-label"><MessageSquare size={16}/><span>评论{(current.commentCount ?? 0) > 0 && ` · ${current.commentCount}`}</span>{(current.unreadComments ?? 0) > 0 && <i className="unread-dot" aria-label="有未读评论"/>}</span></Menu.Item>}
           {!current.deletedAt && !teamId && <Menu.Item key="schedule"><Ico Icon={Clock} text="定时推送"/></Menu.Item>}
           <Menu.Item key="link"><Ico Icon={LinkIcon} text="复制链接"/></Menu.Item>
           <Menu.Item key="export-md"><Ico Icon={FileCode2} text="导出 MD"/></Menu.Item>
           <Menu.Item key="export-txt"><Ico Icon={FileText} text="导出纯文本"/></Menu.Item>
           {current.deletedAt ? <Menu.Item key="delete" disabled={current.canManage === false} className="note-menu-danger"><Ico Icon={Trash2} text="永久删除"/></Menu.Item> : <Menu.Item key="trash" disabled={current.canEdit === false} className="note-menu-danger"><Ico Icon={Trash2} text="删除"/></Menu.Item>}
-        </Menu>}><Button aria-label="备忘录更多操作" type="text" size="small" icon={<MoreHorizontal size={18}/>} disabled={batchBusy}/></Dropdown>
+        </Menu>}><Button aria-label={(current.unreadComments ?? 0) > 0 ? '备忘录更多操作（有未读评论）' : '备忘录更多操作'} className={(current.unreadComments ?? 0) > 0 ? 'has-unread' : undefined} type="text" size="small" icon={<MoreHorizontal size={18}/>} disabled={batchBusy}/></Dropdown>
       </Space></div>
       <NoteEditor user={user!} teamId={teamId} key={(teamId ?? 'personal') + current.id} note={current} onSave={upsert} ref={editorRef} readOnly={batchBusy || current.canEdit === false} onComment={teamId && !current.deletedAt ? () => void safeSwitch(() => setActivity('comments')) : undefined}/>
-      {activity && <Suspense fallback={null}><NoteActivity key={(teamId ?? 'personal') + current.id + activity} note={current} teamId={teamId} user={user} tab={activity} bridge={() => editorRef.current} onSave={upsert} onClose={() => setActivity(null)}/></Suspense>}
+      {activity && <Suspense fallback={null}><NoteActivity key={(teamId ?? 'personal') + current.id + activity} note={current} teamId={teamId} user={user} tab={activity} bridge={() => editorRef.current} onSave={upsert} onStats={(total, unread) => setNotes(items => items.map(item => item.id === current.id && (item.commentCount !== total || item.unreadComments !== unread) ? {...item, commentCount: total, unreadComments: unread} : item))} onClose={() => setActivity(null)}/></Suspense>}
     </> : <div className="editor-empty"><Empty description="留一点空间，给灵感"/><Button type="primary" icon={<Plus size={16}/>} disabled={!canCreate} onClick={() => void newNote()}>新建备忘录</Button></div>}</main></>,
     }}/>
     </Suspense>

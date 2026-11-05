@@ -34,8 +34,40 @@ export function initNotebook(db: Database.Database) {
   if (!columns.has('thread_id')) db.exec('ALTER TABLE note_comments ADD COLUMN thread_id TEXT REFERENCES note_comments(id) ON DELETE CASCADE');
   if (!columns.has('reply_to_id')) db.exec('ALTER TABLE note_comments ADD COLUMN reply_to_id TEXT REFERENCES note_comments(id) ON DELETE SET NULL');
   db.exec('CREATE INDEX IF NOT EXISTS note_comments_thread ON note_comments(note_id,thread_id,created_at,id)');
+  // 每人每篇备忘录的评论已读位置。reads_since 记录该功能首次启用的时间：此前已存在的评论不计为未读。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS note_comment_reads (
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+      read_at TEXT NOT NULL, PRIMARY KEY (user_id, note_id)
+    );
+    CREATE TABLE IF NOT EXISTS note_comment_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+  `);
+  db.prepare("INSERT OR IGNORE INTO note_comment_meta(key,value) VALUES('reads_since',?)").run(new Date().toISOString());
 }
 
+// 某篇备忘录的评论总数，以及当前用户未读的（他人发布、晚于已读位置的）评论数。
+const statsCache = new WeakMap<Database.Database, Database.Statement>();
+export function commentStats(db: Database.Database, userId: string, noteId: string): {total: number; unread: number} {
+  let statement = statsCache.get(db);
+  if (!statement) {
+    statement = db.prepare(`SELECT COUNT(*) AS total,
+      COALESCE(SUM(CASE WHEN c.user_id!=@user AND c.created_at>MAX(COALESCE(r.read_at,''),(SELECT value FROM note_comment_meta WHERE key='reads_since')) THEN 1 ELSE 0 END),0) AS unread
+      FROM note_comments c LEFT JOIN note_comment_reads r ON r.note_id=c.note_id AND r.user_id=@user WHERE c.note_id=@note`);
+    statsCache.set(db, statement);
+  }
+  return statement.get({user: userId, note: noteId}) as {total: number; unread: number};
+}
+
+const commentSelect = `SELECT c.id,c.body,c.mentions,c.mention_ranges AS mentionRanges,c.user_id AS userId,c.created_at AS createdAt,c.thread_id AS threadId,
+  u.username,COALESCE(NULLIF(u.nickname,''),u.username) AS nickname,COALESCE(a.style,'cutouts') AS avatarStyle,COALESCE(a.seed,u.id) AS avatarSeed,
+  r.id AS replyToId,ru.id AS replyToUserId,ru.username AS replyToUsername,COALESCE(NULLIF(ru.nickname,''),ru.username) AS replyToNickname,
+  (SELECT COUNT(*) FROM note_comments replies WHERE replies.thread_id=c.id AND replies.note_id=c.note_id) AS replyCount
+  FROM note_comments c JOIN users u ON u.id=c.user_id LEFT JOIN user_avatars a ON a.user_id=u.id
+  LEFT JOIN note_comments r ON r.id=c.reply_to_id AND r.note_id=c.note_id LEFT JOIN users ru ON ru.id=r.user_id`;
+const commentView = ({replyToId, replyToUserId, replyToUsername, replyToNickname, ...row}: Row) => ({...row,
+  mentions: JSON.parse(row.mentions), mentionRanges: JSON.parse(row.mentionRanges),
+  replyTo: replyToId ? {id: replyToId, userId: replyToUserId, username: replyToUsername, nickname: replyToNickname} : null,
+});
 export function registerNotebook(app: Hono<AppEnv>, db: Database.Database, deps: {
   requireAuth: MiddlewareHandler<AppEnv>; requireLiveSession: (c: AppContext) => void;
   readBody: (c: AppContext, keys: readonly string[]) => Promise<JsonObject>;
@@ -71,6 +103,24 @@ export function registerNotebook(app: Hono<AppEnv>, db: Database.Database, deps:
     return {id: row.id, title: row.title, content: JSON.parse(row.content), plainText: row.plain_text, folderId: row.folder_id,
       pinned: !!row.pinned, deletedAt: row.deleted_at, version: row.version, createdAt: row.created_at, updatedAt: row.updated_at,
       canEdit: row.canEdit, canManage: row.canManage, modifiedBy: author?.name};
+  }
+  // 校验提及成员的权限与标签位置，返回规范化后的提及范围。
+  function normalizeRanges(row: Row, body: Row, text: string, mentions: string[]) {
+    for (const userId of mentions) permission(userId, row.space_id, row.folder_id);
+    const ranges = body.mentionRanges === undefined ? [] : body.mentionRanges;
+    if (!Array.isArray(ranges) || ranges.length > 100) fail(400, '提及标签无效');
+    const normalizedRanges: {userId: string; label: string; from: number; to: number}[] = [];
+    let previousEnd = 0;
+    for (const range of ranges) {
+      if (!range || typeof range !== 'object' || Array.isArray(range)) fail(400, '提及标签无效');
+      const item = range as Row;
+      if (!mentions.includes(item.userId) || typeof item.label !== 'string' || !Number.isInteger(item.from) || !Number.isInteger(item.to) || item.from < previousEnd || item.to <= item.from || item.to > text.length || text.slice(item.from, item.to) !== '@' + item.label) fail(400, '提及标签无效');
+      const member = db.prepare("SELECT COALESCE(NULLIF(nickname,''),username) AS name FROM users WHERE id=?").get(item.userId) as Row;
+      if (item.label !== member.name) fail(409, '成员昵称已更新，请重新选择提及成员');
+      previousEnd = item.to;
+      normalizedRanges.push({userId: item.userId, label: item.label, from: item.from, to: item.to});
+    }
+    return normalizedRanges;
   }
   function checkpoint(row: Row) {
     db.prepare('INSERT OR IGNORE INTO note_history(note_id,version,title,content,plain_text,actor_id,created_at) VALUES(?,?,?,?,?,?,?)')
@@ -118,18 +168,15 @@ export function registerNotebook(app: Hono<AppEnv>, db: Database.Database, deps:
       if (threadId && !db.prepare('SELECT 1 FROM note_comments WHERE id=? AND note_id=? AND thread_id IS NULL').get(threadId, row.id)) fail(404, '评论不存在');
       const before = c.req.query('before') ?? '9999-12-31T23:59:59.999Z', [beforeTime, beforeId] = before.split('|');
       if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(beforeTime) || beforeId !== undefined && !uuid.test(beforeId)) fail(400, '评论分页位置无效');
-      const rows = db.prepare(`SELECT c.id,c.body,c.mentions,c.mention_ranges AS mentionRanges,c.user_id AS userId,c.created_at AS createdAt,c.thread_id AS threadId,
-        u.username,COALESCE(NULLIF(u.nickname,''),u.username) AS nickname,COALESCE(a.style,'cutouts') AS avatarStyle,COALESCE(a.seed,u.id) AS avatarSeed,
-        r.id AS replyToId,ru.id AS replyToUserId,ru.username AS replyToUsername,COALESCE(NULLIF(ru.nickname,''),ru.username) AS replyToNickname,
-        (SELECT COUNT(*) FROM note_comments replies WHERE replies.thread_id=c.id AND replies.note_id=c.note_id) AS replyCount
-        FROM note_comments c JOIN users u ON u.id=c.user_id LEFT JOIN user_avatars a ON a.user_id=u.id
-        LEFT JOIN note_comments r ON r.id=c.reply_to_id AND r.note_id=c.note_id LEFT JOIN users ru ON ru.id=r.user_id
+      const rows = db.prepare(`${commentSelect}
         WHERE c.note_id=? AND c.thread_id IS ? AND (c.created_at<? OR (c.created_at=? AND c.id<?))
         ORDER BY c.created_at DESC,c.id DESC LIMIT 41`).all(row.id, threadId, beforeTime, beforeTime, beforeId ?? '') as Row[];
-      return c.json({comments: rows.slice(0, 40).map(({replyToId, replyToUserId, replyToUsername, replyToNickname, ...row}) => ({...row,
-        mentions: JSON.parse(row.mentions), mentionRanges: JSON.parse(row.mentionRanges),
-        replyTo: replyToId ? {id: replyToId, userId: replyToUserId, username: replyToUsername, nickname: replyToNickname} : null,
-      })), next: rows.length > 40 ? rows[39].createdAt + '|' + rows[39].id : null, supportsMentionRanges: true, supportsReplies: true});
+      // 顶层评论附带最近两条回复（按时间正序），列表无需为每个评论串单独请求即可展示讨论的最新进展。
+      const recent = db.prepare(`${commentSelect} WHERE c.note_id=? AND c.thread_id=? ORDER BY c.created_at DESC,c.id DESC LIMIT 2`);
+      return c.json({comments: rows.slice(0, 40).map(item => ({...commentView(item),
+        ...(threadId === null && item.replyCount > 0 ? {recentReplies: (recent.all(row.id, item.id) as Row[]).reverse().map(commentView)} : {}),
+      })), next: rows.length > 40 ? rows[39].createdAt + '|' + rows[39].id : null, supportsMentionRanges: true, supportsReplies: true,
+        total: (db.prepare('SELECT COUNT(*) AS n FROM note_comments WHERE note_id=?').get(row.id) as Row).n});
     });
     app.post(prefix + '/:id/comments', async c => {
       const body = await readBody(c, ['body', 'mentions', 'mentionRanges', 'replyToId']);
@@ -145,20 +192,7 @@ export function registerNotebook(app: Hono<AppEnv>, db: Database.Database, deps:
         if (replyToId && !target) fail(404, '回复的评论不存在或已删除');
         const threadId = target ? target.thread_id ?? target.id : null;
         if ((db.prepare("SELECT COUNT(*) AS count FROM note_comments WHERE user_id=? AND created_at>strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 minute')").get(uid(c)) as Row).count >= 20) fail(429, '评论过于频繁，请稍后再试');
-        for (const userId of mentions) permission(userId, row.space_id, row.folder_id);
-        const ranges = body.mentionRanges === undefined ? [] : body.mentionRanges;
-        if (!Array.isArray(ranges) || ranges.length > 100) fail(400, '提及标签无效');
-        const normalizedRanges: {userId: string; label: string; from: number; to: number}[] = [];
-        let previousEnd = 0;
-        for (const range of ranges) {
-          if (!range || typeof range !== 'object' || Array.isArray(range)) fail(400, '提及标签无效');
-          const item = range as Row;
-          if (!mentions.includes(item.userId) || typeof item.label !== 'string' || !Number.isInteger(item.from) || !Number.isInteger(item.to) || item.from < previousEnd || item.to <= item.from || item.to > text.length || text.slice(item.from, item.to) !== '@' + item.label) fail(400, '提及标签无效');
-          const member = db.prepare("SELECT COALESCE(NULLIF(nickname,''),username) AS name FROM users WHERE id=?").get(item.userId) as Row;
-          if (item.label !== member.name) fail(409, '成员昵称已更新，请重新选择提及成员');
-          previousEnd = item.to;
-          normalizedRanges.push({userId: item.userId, label: item.label, from: item.from, to: item.to});
-        }
+        const normalizedRanges = normalizeRanges(row, body, text, mentions);
         const now = new Date().toISOString(), commentId = randomUUID();
         db.prepare('INSERT INTO note_comments(id,note_id,user_id,body,mentions,mention_ranges,created_at,thread_id,reply_to_id) VALUES(?,?,?,?,?,?,?,?,?)').run(commentId, row.id, uid(c), text, JSON.stringify(mentions), JSON.stringify(normalizedRanges), now, threadId, replyToId);
         const t = db.prepare('SELECT name FROM teams WHERE id=?').get(row.space_id) as Row;
@@ -174,6 +208,15 @@ export function registerNotebook(app: Hono<AppEnv>, db: Database.Database, deps:
               `${c.get('user')!.nickname} 在「${row.title}」中${reply ? '回复了你的评论' : '提到了你'}`, row.space_id, t.name, row.id, row.folder_id);
         }
       })(); return c.json({ok: true}, 201);
+    });
+    // 记录已读位置：upTo 为客户端已看到的最新评论时间，只前进不后退，且不会超过当前时间。
+    app.post(prefix + '/:id/comments/read', async c => {
+      const body = await readBody(c, ['upTo']), row = note(c);
+      if (row.space_id === row.user_id) return c.json({total: 0, unread: 0});
+      if (typeof body.upTo !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(body.upTo)) fail(400, '已读时间无效');
+      const readAt = body.upTo < new Date().toISOString() ? body.upTo : new Date().toISOString();
+      db.prepare('INSERT INTO note_comment_reads(user_id,note_id,read_at) VALUES(?,?,?) ON CONFLICT(user_id,note_id) DO UPDATE SET read_at=MAX(read_at,excluded.read_at)').run(uid(c), row.id, readAt);
+      return c.json(commentStats(db, uid(c), row.id));
     });
     app.delete(prefix + '/:id/comments/:commentId', c => {
       db.transaction(() => {
