@@ -346,3 +346,37 @@ test('评论未读：未读数、已读位置只前进、自己发的不算未�
   assert.equal((await f.request(f.owner, path + '/comments/read', 'POST', {upTo: newest.createdAt})).unread, 0);
   assert.equal((await f.request(f.owner, path + '/comments/read', 'POST', {upTo: mine.createdAt})).unread, 0, '已读位置不会后退');
 });
+
+test('评论引用：保存锚点、列表返回、回复不能带引用、权限隔离', async t => {
+  const f = await fixture(t), {note} = await f.request(f.owner, f.base + '/notes', 'POST', {folderId: null}, 201), path = f.base + '/notes/' + note.id;
+  const position = id => ({type: {client: 1000, clock: id}, assoc: 0});
+  const anchor = {from: position(1), to: position(9), quote: '被评论的这段文字'};
+  await f.request(f.editor, path + '/comments', 'POST', {body: '带引用的评论', mentions: [], anchor}, 201);
+  await f.request(f.editor, path + '/comments', 'POST', {body: '普通评论', mentions: []}, 201);
+  const listing = (await f.request(f.owner, path + '/comments')).comments;
+  const quoted = listing.find(item => item.body === '带引用的评论'), plain = listing.find(item => item.body === '普通评论');
+  assert.deepEqual(quoted.anchor, anchor); assert.equal(plain.anchor, null);
+  assert.deepEqual((await f.request(f.owner, path + '/comment-anchors')).anchors, [{id: quoted.id, anchor}]);
+  assert.deepEqual((await f.request(f.viewer, path + '/comment-anchors')).anchors, [{id: quoted.id, anchor}]);
+  await f.request(f.outsider, path + '/comment-anchors', 'GET', undefined, 404);
+  // 回复不能带引用；非法引用被拒绝，且不会产生评论。
+  await f.request(f.editor, path + '/comments', 'POST', {body: '回复', mentions: [], replyToId: quoted.id, anchor}, 400);
+  for (const bad of [{from: position(1)}, {...anchor, quote: ''}, {...anchor, extra: 1}, 'x', [], {...anchor, from: {type: {client: -1, clock: 0}}}]) {
+    await f.request(f.editor, path + '/comments', 'POST', {body: '坏引用', mentions: [], anchor: bad}, 400);
+  }
+  assert.equal((await f.request(f.owner, path + '/comments')).total, 2);
+  // 删除评论后锚点一并消失。
+  await f.request(f.editor, path + '/comments/' + quoted.id, 'DELETE');
+  assert.deepEqual((await f.request(f.owner, path + '/comment-anchors')).anchors, []);
+});
+
+test('评论实时推送：新增和删除评论会通知正在打开该备忘录的客户端', async t => {
+  const f = await fixture(t), {note} = await f.request(f.owner, f.base + '/notes', 'POST', {folderId: null}, 201), path = f.base + '/notes/' + note.id;
+  const a = f.connect(f.owner, note.id); await until(() => a.state.synced, '打开协作文档');
+  let events = 0; a.onCommentsChanged(() => { events++; });
+  await f.request(f.editor, path + '/comments', 'POST', {body: '推送测试', mentions: []}, 201);
+  await until(() => events === 1, '收到新增评论通知');
+  const comment = (await f.request(f.owner, path + '/comments')).comments[0];
+  await f.request(f.editor, path + '/comments/' + comment.id, 'DELETE');
+  await until(() => events === 2, '收到删除评论通知');
+});

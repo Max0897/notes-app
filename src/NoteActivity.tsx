@@ -8,7 +8,7 @@ import TaskItem from '@tiptap/extension-task-item';
 import {EditorLink, openEditorLink} from './editorLinks';
 import {EditorImage} from './editorImages';
 import {documentExtensions} from './editorExtensions';
-import {api, type EditorBridge, type Note, type User} from './api';
+import {api, type CommentAnchor, type EditorBridge, type Note, type User} from './api';
 import {CommentComposer} from './CommentComposer';
 import type {MentionMember} from './commentMentions';
 import {CommentThread, type NoteComment, type ReplyTarget} from './CommentThread';
@@ -32,8 +32,9 @@ function Preview({content}: {content: any}) {
   return <div className="snapshot-preview"><EditorContent editor={editor}/></div>;
 }
 
-export function NoteActivity({note, teamId, user, tab, bridge, onSave, onStats, onClose}: {
+export function NoteActivity({note, teamId, user, tab, bridge, pendingAnchor, onAnchorUsed, focusComment, onSave, onStats, onClose}: {
   note: Note; teamId: string | null; user: User; tab: 'history' | 'comments'; bridge: () => EditorBridge | null;
+  pendingAnchor: CommentAnchor | null; onAnchorUsed: () => void; focusComment: {id: string; nonce: number} | null;
   onSave: (note: Note) => void; onStats: (total: number, unread: number) => void; onClose: () => void;
 }) {
   const path = (teamId ? '/teams/' + teamId : '') + '/notes/' + note.id;
@@ -43,7 +44,8 @@ export function NoteActivity({note, teamId, user, tab, bridge, onSave, onStats, 
   const [supportsMentionRanges, setSupportsMentionRanges] = useState(false), [supportsReplies, setSupportsReplies] = useState(false);
   const [replyTo, setReplyTo] = useState<ReplyTarget | null>(null), [expandedThreads, setExpandedThreads] = useState<string[]>([]);
   const [commentRefresh, setCommentRefresh] = useState(0);
-  const lastRead = useRef(''), onStatsRef = useRef(onStats);
+  const [, setAnchorTick] = useState(0);
+  const lastRead = useRef(''), handledFocus = useRef(0), onStatsRef = useRef(onStats);
   onStatsRef.current = onStats;
   const panel = useRef<HTMLElement>(null), loadedCommentPages = useRef(1);
   // 评论按时间正序显示：打开时、自己发送后、以及已在底部时有新评论，都滚到底；向上加载更早评论时保持当前阅读位置。
@@ -80,15 +82,33 @@ export function NoteActivity({note, teamId, user, tab, bridge, onSave, onStats, 
       } catch (error) { if (active) setError((error as Error).message); }
       finally { if (active) setLoading(false); }
     }
-    void load(); const timer = tab === 'comments' ? setInterval(load, 10000) : undefined;
-    return () => { active = false; clearInterval(timer); };
-  }, [path, tab]);
+    // 评论变化由服务器实时推送；定时轮询只作为连接中断时的兜底。
+    const changed = (event: Event) => { if (tab === 'comments' && (event as CustomEvent).detail?.noteId === note.id) { setCommentRefresh(value => value + 1); void load(); } };
+    window.addEventListener('note-comments:changed', changed);
+    void load(); const timer = tab === 'comments' ? setInterval(load, 30000) : undefined;
+    return () => { active = false; clearInterval(timer); window.removeEventListener('note-comments:changed', changed); };
+  }, [path, tab, note.id]);
   useLayoutEffect(() => {
     const element = scroller.current;
     if (tab !== 'comments' || !element) return;
     if (prependAnchor.current !== null) { element.scrollTop = element.scrollHeight - prependAnchor.current; prependAnchor.current = null; }
     else if (stickToBottom.current) element.scrollTop = element.scrollHeight;
   }, [comments, tab, loading]);
+  // 点击正文里的评论高亮后，滚动到对应评论并短暂高亮；评论还没加载出来时等加载完再处理。
+  useEffect(() => {
+    if (!focusComment || tab !== 'comments' || handledFocus.current === focusComment.nonce) return;
+    const element = panel.current?.querySelector<HTMLElement>(`[data-comment-id="${CSS.escape(focusComment.id)}"]`);
+    if (!element) return;
+    handledFocus.current = focusComment.nonce; stickToBottom.current = false;
+    element.scrollIntoView({block: 'center', behavior: 'smooth'}); element.classList.add('is-focus');
+    setTimeout(() => element.classList.remove('is-focus'), 2000);
+  }, [focusComment, comments, tab]);
+  // 正文里被引用的文字有变化时，重新渲染以同步卡片上的引用。
+  useEffect(() => {
+    const changed = () => setAnchorTick(value => value + 1);
+    window.addEventListener('note-anchors:changed', changed);
+    return () => window.removeEventListener('note-anchors:changed', changed);
+  }, []);
   useEffect(() => {
     // 宽屏下面板停靠在编辑区右侧，可同时编辑正文，只能通过关闭按钮或 Esc 关闭；窄屏下面板覆盖在编辑区上，点击外部关闭。
     const outside = (event: PointerEvent) => {
@@ -136,16 +156,18 @@ export function NoteActivity({note, teamId, user, tab, bridge, onSave, onStats, 
         {[...comments].reverse().map(comment => <CommentThread key={comment.id} comment={comment} path={path} members={members} userId={user.id}
           editable={editable} canManage={!!note.canManage} busy={busy} supportsReplies={supportsReplies}
           expanded={expandedThreads.includes(comment.id)} onToggle={() => setExpandedThreads(ids => ids.includes(comment.id) ? ids.filter(id => id !== comment.id) : [...ids, comment.id])}
-          refresh={commentRefresh} onReply={setReplyTo} onDelete={id => run(async () => {
+          refresh={commentRefresh} anchorText={anchor => bridge()?.anchors?.text(anchor)}
+          onJump={target => { if (!target.anchor || !bridge()?.anchors?.reveal(target.id, target.anchor)) Message.info('原文已被修改或删除，无法定位'); }} onReply={setReplyTo} onDelete={id => run(async () => {
             await api(path + '/comments/' + id, 'DELETE');
             if (replyTo?.id === id || replyTo?.threadId === id) setReplyTo(null);
             setCommentRefresh(value => value + 1); await loadComments();
           })}/>)}
       </>}
     </Spin></div>
-    {tab === 'comments' && editable && <CommentComposer members={members} busy={busy} replyTo={replyTo} onCancelReply={() => setReplyTo(null)} onSend={payload => run(async () => {
+    {tab === 'comments' && editable && <CommentComposer members={members} busy={busy} replyTo={replyTo} anchor={replyTo ? null : pendingAnchor} onClearAnchor={onAnchorUsed} onCancelReply={() => setReplyTo(null)} onSend={payload => run(async () => {
       const data = supportsMentionRanges ? payload : {body: payload.body, mentions: payload.mentions};
-      await api(path + '/comments', 'POST', replyTo ? {...data, replyToId: replyTo.id} : data);
+      await api(path + '/comments', 'POST', replyTo ? {...data, replyToId: replyTo.id} : pendingAnchor ? {...data, anchor: pendingAnchor} : data);
+      if (!replyTo && pendingAnchor) onAnchorUsed();
       stickToBottom.current = true;
       setReplyTo(null); setCommentRefresh(value => value + 1);
       await loadComments().catch(error => setError('评论已发送，列表加载失败：' + (error as Error).message));

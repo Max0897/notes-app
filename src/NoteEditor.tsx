@@ -93,7 +93,7 @@ return <>
 </>;
 });
 
-export const NoteEditor=forwardRef<EditorBridge,{note:Note;onSave:(n:Note)=>void;user:User;readOnly?:boolean;teamId?:string|null;onComment?:()=>void}>(function NoteEditor(props,bridge){
+export const NoteEditor=forwardRef<EditorBridge,{note:Note;onSave:(n:Note)=>void;user:User;readOnly?:boolean;teamId?:string|null;onComment?:()=>void;onOpenComment?:(id:string)=>void}>(function NoteEditor(props,bridge){
   return props.teamId&&!props.note.deletedAt
     ? <Suspense fallback={<div className="editor-empty" role="status">正在加载协作编辑器…</div>}><TeamNoteEditor {...props} teamId={props.teamId} ref={bridge}/></Suspense>
     : <SavedNoteEditor {...props} ref={bridge}/>;

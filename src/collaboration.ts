@@ -24,6 +24,7 @@ export class CollaborationSession {
   state: CollaborationState;
   private savedStamp = '';
   private listeners = new Set<() => void>();
+  private commentListeners = new Set<() => void>();
   private destroyed = false;
   private localChanges = false;
   private drafts: DraftStore;
@@ -63,7 +64,8 @@ export class CollaborationSession {
         } else if (message.type === 'saved') {
           this.savedStamp = message.stamp;
           if (!this.state.note || message.note.version >= this.state.note.version) this.state.note = message.note;
-        } else if (message.type === 'denied') { this.deny(message.message); return; }
+        } else if (message.type === 'comments') { this.commentListeners.forEach(listener => listener()); return; }
+        else if (message.type === 'denied') { this.deny(message.message); return; }
         this.publish();
       },
       onUnsyncedChanges: () => this.publish(),
@@ -76,6 +78,8 @@ export class CollaborationSession {
     });
     this.provider.setAwarenessField('user', this.state.me);
   }
+  // 服务器通知该备忘录的评论有变化（新增或删除）时回调。
+  onCommentsChanged = (listener: () => void) => { this.commentListeners.add(listener); return () => { this.commentListeners.delete(listener); }; };
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private publish() {
     if (this.destroyed) return;
@@ -122,7 +126,7 @@ export class CollaborationSession {
     this.provider.setAwarenessField('editing', editing && this.state.canEdit);
   }
   destroy() {
-    this.destroyed = true; this.listeners.clear();
+    this.destroyed = true; this.listeners.clear(); this.commentListeners.clear();
     this.provider.destroy(); this.socket.destroy(); this.document.destroy();
   }
 }

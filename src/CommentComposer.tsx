@@ -16,8 +16,9 @@ function mentionAt(editor: Editor) {
   return match && !(match.index && /[\w@]/.test(before[match.index - 1])) ? {query: match[1], from: $from.pos - match[0].length, to: $from.pos} : null;
 }
 
-export function CommentComposer({members, busy, replyTo, onCancelReply, onSend}: {
+export function CommentComposer({members, busy, replyTo, anchor, onClearAnchor, onCancelReply, onSend}: {
   members: MentionMember[]; busy: boolean; replyTo?: {id: string; name: string} | null;
+  anchor?: {quote: string} | null; onClearAnchor?: () => void;
   onCancelReply?: () => void; onSend: (payload: CommentPayload) => Promise<boolean>;
 }) {
   const sendTitle = useHintTitle('Enter 发送，Shift+Enter 换行');
@@ -69,6 +70,7 @@ export function CommentComposer({members, busy, replyTo, onCancelReply, onSend}:
   useEffect(() => { if (replyId && editor?.isEditable) editor.commands.focus('end'); }, [editor, replyId]);
   const invalid = draft.body.length > 2000 || draft.mentions.length > 20;
   return <form className="comment-form" onSubmit={event => { event.preventDefault(); void send(); }}>
+    {anchor && <div className="comment-anchor-chip" title={anchor.quote}><span>引用：{anchor.quote}</span><Button type="text" size="mini" aria-label="取消引用" icon={<X size={14}/>} disabled={busy} onClick={onClearAnchor}/></div>}
     {replyTo && <div className="comment-replying"><span>回复 {replyTo.name}</span><Button type="text" size="mini" aria-label="取消回复" icon={<X size={14}/>} disabled={busy} onClick={onCancelReply}/></div>}
     <div className="comment-composer" aria-disabled={busy}>
       {!draft.body && editor?.isEmpty && <span className="comment-placeholder">{replyTo ? '回复 ' + replyTo.name : '写下评论，输入 @ 提及成员'}</span>}

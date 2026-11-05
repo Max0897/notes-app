@@ -737,7 +737,7 @@ images.register(app, requireAuth, requireLiveSession);
 registerCollaboration(app, db, {readBody, requireAuth, requireLiveSession, verifyCurrentPassword, validateContent, validateImages: images.validateReferences, folderName, ApiError, dataDir});
 registerNotifications(app, db, {readBody, requireAuth, requireLiveSession, ApiError});
 webhooks.register(app, {requireAuth, requireLiveSession, readBody, ApiError, takeRateLimit});
-registerNotebook(app, db, {readBody, requireAuth, requireLiveSession, validateContent, validateImages: images.validateReferences, ApiError, restore: realtime.restore});
+registerNotebook(app, db, {readBody, requireAuth, requireLiveSession, validateContent, validateImages: images.validateReferences, ApiError, restore: realtime.restore, notifyComments: realtime.notifyComments});
 
 app.use('/api/folders', requireAuth);
 app.use('/api/folders/*', requireAuth);

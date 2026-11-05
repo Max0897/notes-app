@@ -6,7 +6,11 @@ export type {AvatarStyle} from '../server/avatarStyles.js';
 import type {AvatarStyle} from '../server/avatarStyles.js';
 export type User = { id: string; username: string; nickname: string; avatarStyle: AvatarStyle; avatarSeed: string };
 export const displayName = (user: {username: string; nickname?: string}) => user.nickname || user.username;
-export type EditorBridge = { flush: () => Promise<boolean>; snapshot: () => Note; hasChanges: () => boolean; draft: () => string; command?: (action: 'find' | 'outline' | 'focus') => void };
+// 评论锚点：选中文字起止位置的 Yjs 相对位置（JSON）和选中文字的快照。
+export type CommentAnchor = { from: unknown; to: unknown; quote: string };
+// text：引用当前对应的正文文字；null 表示原文已被删除，undefined 表示编辑器尚未就绪。
+export type EditorAnchors = { capture: () => CommentAnchor | null; text: (anchor: CommentAnchor) => string | null | undefined; reveal: (id: string, anchor: CommentAnchor) => boolean };
+export type EditorBridge = { flush: () => Promise<boolean>; snapshot: () => Note; hasChanges: () => boolean; draft: () => string; command?: (action: 'find' | 'outline' | 'focus') => void; anchors?: EditorAnchors };
 export type TeamRole = 'owner' | 'admin' | 'editor' | 'viewer';
 export type Team = {id: string; name: string; description: string; icon: string; role: TeamRole; ownerId: string; createdAt: string; deletedAt: string | null; revision: number};
 export type AppNotification = {id: number; kind: string; title: string; message: string; teamId: string | null; teamName: string | null; noteId: string | null; createdAt: string; readAt: string | null; canOpen: boolean; canRespond: boolean};

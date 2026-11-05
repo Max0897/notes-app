@@ -308,7 +308,11 @@ export function createRealtime(db: Database.Database, options: {
       };
     } catch (error) { candidate.destroy(); throw error; }
   }
-  return {attach, revalidate, restore, async close() {
+  // 评论有新增或删除时，通知正在打开该备忘录的所有客户端立即刷新，替代轮询。
+  function notifyComments(teamId: string, noteId: string) {
+    instance.documents.get(`team:${teamId}:note:${noteId}`)?.broadcastStateless(JSON.stringify({type: 'comments'}));
+  }
+  return {attach, revalidate, restore, notifyComments, async close() {
     clearInterval(check); instance.closeConnections();
     for (const ws of sockets.clients) ws.terminate(); sockets.close();
     await instance.flushPendingStores();

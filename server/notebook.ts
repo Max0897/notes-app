@@ -35,6 +35,8 @@ export function initNotebook(db: Database.Database) {
   if (!columns.has('reply_to_id')) db.exec('ALTER TABLE note_comments ADD COLUMN reply_to_id TEXT REFERENCES note_comments(id) ON DELETE SET NULL');
   db.exec('CREATE INDEX IF NOT EXISTS note_comments_thread ON note_comments(note_id,thread_id,created_at,id)');
   // 每人每篇备忘录的评论已读位置。reads_since 记录该功能首次启用的时间：此前已存在的评论不计为未读。
+  // 评论锚点：选中文字的 Yjs 相对位置（随协作编辑一起移动）加选中文字的快照，不改动正文。
+  if (!columns.has('anchor')) db.exec('ALTER TABLE note_comments ADD COLUMN anchor TEXT');
   db.exec(`
     CREATE TABLE IF NOT EXISTS note_comment_reads (
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
@@ -58,16 +60,40 @@ export function commentStats(db: Database.Database, userId: string, noteId: stri
   return statement.get({user: userId, note: noteId}) as {total: number; unread: number};
 }
 
-const commentSelect = `SELECT c.id,c.body,c.mentions,c.mention_ranges AS mentionRanges,c.user_id AS userId,c.created_at AS createdAt,c.thread_id AS threadId,
+const commentSelect = `SELECT c.id,c.body,c.mentions,c.mention_ranges AS mentionRanges,c.user_id AS userId,c.created_at AS createdAt,c.anchor,c.thread_id AS threadId,
   u.username,COALESCE(NULLIF(u.nickname,''),u.username) AS nickname,COALESCE(a.style,'cutouts') AS avatarStyle,COALESCE(a.seed,u.id) AS avatarSeed,
   r.id AS replyToId,ru.id AS replyToUserId,ru.username AS replyToUsername,COALESCE(NULLIF(ru.nickname,''),ru.username) AS replyToNickname,
   (SELECT COUNT(*) FROM note_comments replies WHERE replies.thread_id=c.id AND replies.note_id=c.note_id) AS replyCount
   FROM note_comments c JOIN users u ON u.id=c.user_id LEFT JOIN user_avatars a ON a.user_id=u.id
   LEFT JOIN note_comments r ON r.id=c.reply_to_id AND r.note_id=c.note_id LEFT JOIN users ru ON ru.id=r.user_id`;
 const commentView = ({replyToId, replyToUserId, replyToUsername, replyToNickname, ...row}: Row) => ({...row,
-  mentions: JSON.parse(row.mentions), mentionRanges: JSON.parse(row.mentionRanges),
+  mentions: JSON.parse(row.mentions), mentionRanges: JSON.parse(row.mentionRanges), anchor: row.anchor ? JSON.parse(row.anchor) : null,
   replyTo: replyToId ? {id: replyToId, userId: replyToUserId, username: replyToUsername, nickname: replyToNickname} : null,
 });
+// Yjs 相对位置的 JSON 形式：{type?, tname?, item?, assoc?}，其中 type/item 为 {client, clock} 或 null。逐字段校验后重新组装，不保存客户端多传的内容。
+const idPattern = (value: unknown): value is {client: number; clock: number} => !!value && typeof value === 'object' && !Array.isArray(value)
+  && Object.keys(value).every(key => key === 'client' || key === 'clock')
+  && Number.isSafeInteger((value as Row).client) && (value as Row).client >= 0 && Number.isSafeInteger((value as Row).clock) && (value as Row).clock >= 0;
+function relativePosition(value: unknown): Row | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const source = value as Row, result: Row = {};
+  if (Object.keys(source).some(key => !['type', 'tname', 'item', 'assoc'].includes(key))) return null;
+  for (const key of ['type', 'item']) {
+    if (source[key] === undefined) continue;
+    if (source[key] !== null && !idPattern(source[key])) return null;
+    result[key] = source[key] === null ? null : {client: source[key].client, clock: source[key].clock};
+  }
+  if (source.tname !== undefined) { if (source.tname !== null && (typeof source.tname !== 'string' || source.tname.length > 100)) return null; result.tname = source.tname; }
+  if (source.assoc !== undefined) { if (!Number.isInteger(source.assoc) || Math.abs(source.assoc) > 1) return null; result.assoc = source.assoc; }
+  return result.item === undefined && result.tname === undefined && result.type === undefined ? null : result;
+}
+export function checkedAnchor(value: unknown): {from: Row; to: Row; quote: string} | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const source = value as Row, from = relativePosition(source.from), to = relativePosition(source.to);
+  const quote = typeof source.quote === 'string' ? Array.from(source.quote.replace(/\s+/g, ' ').trim()).slice(0, 200).join('') : '';
+  if (Object.keys(source).some(key => !['from', 'to', 'quote'].includes(key)) || !from || !to || !quote) return null;
+  return {from, to, quote};
+}
 export function registerNotebook(app: Hono<AppEnv>, db: Database.Database, deps: {
   requireAuth: MiddlewareHandler<AppEnv>; requireLiveSession: (c: AppContext) => void;
   readBody: (c: AppContext, keys: readonly string[]) => Promise<JsonObject>;
@@ -75,10 +101,12 @@ export function registerNotebook(app: Hono<AppEnv>, db: Database.Database, deps:
   validateImages: (value: unknown, spaceId: string, userId: string, noteId?: string) => void;
   ApiError: new (status: 400 | 401 | 403 | 404 | 409 | 429, message: string) => Error;
   restore: (teamId: string, noteId: string, actorId: string, title: string, content: JsonObject) => () => void;
+  notifyComments: (teamId: string, noteId: string) => void;
 }) {
   const {requireAuth, requireLiveSession, readBody, validateContent, ApiError} = deps;
   function fail(status: 400 | 403 | 404 | 409 | 429, message: string): never { throw new ApiError(status, message); }
   const uid = (c: AppContext) => c.get('user')!.id;
+  const noteIdOf = (c: AppContext) => id(c.req.param('id'));
   const id = (value: unknown): string => typeof value === 'string' && uuid.test(value) ? value : fail(400, '资源编号无效');
   const space = (c: AppContext) => c.req.param('teamId') ? id(c.req.param('teamId')) : uid(c);
   function permission(userId: string, spaceId: string, folderId: string | null) {
@@ -178,13 +206,22 @@ export function registerNotebook(app: Hono<AppEnv>, db: Database.Database, deps:
       })), next: rows.length > 40 ? rows[39].createdAt + '|' + rows[39].id : null, supportsMentionRanges: true, supportsReplies: true,
         total: (db.prepare('SELECT COUNT(*) AS n FROM note_comments WHERE note_id=?').get(row.id) as Row).n});
     });
+    // 带引用位置的顶层评论，供编辑器在正文里高亮；不分页，最多返回最近 200 条。
+    app.get(prefix + '/:id/comment-anchors', c => {
+      const row = note(c);
+      if (row.space_id === row.user_id) return c.json({anchors: []});
+      const rows = db.prepare('SELECT id,anchor FROM note_comments WHERE note_id=? AND thread_id IS NULL AND anchor IS NOT NULL ORDER BY created_at DESC,id DESC LIMIT 200').all(row.id) as Row[];
+      return c.json({anchors: rows.map(item => ({id: item.id, anchor: JSON.parse(item.anchor)}))});
+    });
     app.post(prefix + '/:id/comments', async c => {
-      const body = await readBody(c, ['body', 'mentions', 'mentionRanges', 'replyToId']);
+      const body = await readBody(c, ['body', 'mentions', 'mentionRanges', 'replyToId', 'anchor']);
       if (typeof body.body !== 'string' || !body.body.trim() || body.body.length > 2000) fail(400, '评论须为 1 至 2000 字');
       if (!Array.isArray(body.mentions) || body.mentions.length > 20) fail(400, '最多提及 20 位成员');
       const mentions = [...new Set(body.mentions.map(id))];
       const text = (body.body as string).trim();
       const replyToId = body.replyToId === undefined || body.replyToId === null ? null : id(body.replyToId);
+      // 锚点只用于顶层评论（针对正文某段文字），回复沿用所在评论串的锚点。
+      const anchor = body.anchor === undefined || body.anchor === null ? null : replyToId ? fail(400, '回复不能带引用位置') : checkedAnchor(body.anchor) ?? fail(400, '引用位置无效');
       db.transaction(() => {
         requireLiveSession(c); const row = note(c, true);
         if (row.space_id === row.user_id) fail(400, '评论用于团队备忘录');
@@ -194,7 +231,7 @@ export function registerNotebook(app: Hono<AppEnv>, db: Database.Database, deps:
         if ((db.prepare("SELECT COUNT(*) AS count FROM note_comments WHERE user_id=? AND created_at>strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 minute')").get(uid(c)) as Row).count >= 20) fail(429, '评论过于频繁，请稍后再试');
         const normalizedRanges = normalizeRanges(row, body, text, mentions);
         const now = new Date().toISOString(), commentId = randomUUID();
-        db.prepare('INSERT INTO note_comments(id,note_id,user_id,body,mentions,mention_ranges,created_at,thread_id,reply_to_id) VALUES(?,?,?,?,?,?,?,?,?)').run(commentId, row.id, uid(c), text, JSON.stringify(mentions), JSON.stringify(normalizedRanges), now, threadId, replyToId);
+        db.prepare('INSERT INTO note_comments(id,note_id,user_id,body,mentions,mention_ranges,created_at,thread_id,reply_to_id,anchor) VALUES(?,?,?,?,?,?,?,?,?,?)').run(commentId, row.id, uid(c), text, JSON.stringify(mentions), JSON.stringify(normalizedRanges), now, threadId, replyToId, anchor ? JSON.stringify(anchor) : null);
         const t = db.prepare('SELECT name FROM teams WHERE id=?').get(row.space_id) as Row;
         const recipients = new Set(mentions);
         if (target) {
@@ -207,7 +244,7 @@ export function registerNotebook(app: Hono<AppEnv>, db: Database.Database, deps:
             .run(userId, reply ? 'note_comment_reply' : 'note_mention', reply ? '有人回复了你的评论' : '有人在评论中提到了你',
               `${c.get('user')!.nickname} 在「${row.title}」中${reply ? '回复了你的评论' : '提到了你'}`, row.space_id, t.name, row.id, row.folder_id);
         }
-      })(); return c.json({ok: true}, 201);
+      })(); deps.notifyComments(space(c), noteIdOf(c)); return c.json({ok: true}, 201);
     });
     // 记录已读位置：upTo 为客户端已看到的最新评论时间，只前进不后退，且不会超过当前时间。
     app.post(prefix + '/:id/comments/read', async c => {
@@ -225,7 +262,7 @@ export function registerNotebook(app: Hono<AppEnv>, db: Database.Database, deps:
         if (!comment) fail(404, '评论不存在');
         if (comment.user_id !== uid(c) && !row.canManage) fail(403, '只能删除自己的评论');
         db.prepare('DELETE FROM note_comments WHERE id=? AND note_id=?').run(c.req.param('commentId'), row.id);
-      })(); return c.json({ok: true});
+      })(); deps.notifyComments(space(c), noteIdOf(c)); return c.json({ok: true});
     });
     app.post(prefix + '/export', async c => {
       const body = await readBody(c, ['ids', 'format']);

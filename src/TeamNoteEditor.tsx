@@ -18,9 +18,11 @@ import {CollaborationSession, type CollaborationState} from './collaboration';
 import type {EditorBridge, Note, User} from './api';
 import {documentExtensions, interactionExtensions} from './editorExtensions';
 import {editorAction} from './editorSearch';
+import {CommentAnchors, anchorText, captureAnchor, revealCommentAnchor, setCommentAnchorOpener, setCommentAnchors} from './editorCommentAnchors';
+import {api} from './api';
 
 const {Text} = Typography;
-type Props = {note: Note; onSave: (note: Note) => void; user: User; teamId: string; readOnly?: boolean; onComment?: () => void};
+type Props = {note: Note; onSave: (note: Note) => void; user: User; teamId: string; readOnly?: boolean; onComment?: () => void; onOpenComment?: (id: string) => void};
 
 export const TeamNoteEditor = forwardRef<EditorBridge, Props>(function TeamNoteEditor(props, bridge) {
   const [session, setSession] = useState<CollaborationSession | null>(null);
@@ -30,21 +32,24 @@ export const TeamNoteEditor = forwardRef<EditorBridge, Props>(function TeamNoteE
     flush: () => inner.current?.flush() ?? Promise.resolve(!session?.hasChanges()), snapshot: () => inner.current?.snapshot() ?? props.note,
     hasChanges: () => inner.current?.hasChanges() ?? session?.hasChanges() ?? false, draft: () => inner.current?.draft() ?? '',
     command: action => inner.current?.command?.(action),
+    anchors: {capture: () => inner.current?.anchors?.capture() ?? null, text: anchor => inner.current?.anchors?.text(anchor), reveal: (id, anchor) => inner.current?.anchors?.reveal(id, anchor) ?? false},
   }), [session, props.note]);
   useEffect(() => {
     const url = new URL('/api/collaboration', location.href); url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const active = new CollaborationSession(props.teamId, props.note.id, props.user, url.href);
     const unsubscribe = active.subscribe(() => setState(active.state));
+    // 评论有新增或删除时通知评论面板和列表角标立即刷新。
+    const unsubscribeComments = active.onCommentsChanged(() => window.dispatchEvent(new CustomEvent('note-comments:changed', {detail: {noteId: props.note.id}})));
     // Initialize the external connection after mount; rendering must not open sockets.
     // oxlint-disable-next-line react/set-state-in-effect
     setSession(active); setState(active.state); active.start();
-    return () => { unsubscribe(); active.destroy(); };
+    return () => { unsubscribe(); unsubscribeComments(); active.destroy(); };
   }, [props.teamId, props.note.id, props.user]);
   if (!session || !state?.synced) return <div className="editor-empty" role="status">{state?.error ? <Alert type="warning" content={state.error}/> : <><Spin/><Text type="secondary">正在连接协作…</Text></>}</div>;
   return <CollaborativeEditor {...props} session={session} state={state} ref={inner}/>;
 });
 
-const CollaborativeEditor = forwardRef<EditorBridge, Props & {session: CollaborationSession; state: CollaborationState}>(function CollaborativeEditor({note, onSave, readOnly, session, state, onComment, teamId}, bridge) {
+const CollaborativeEditor = forwardRef<EditorBridge, Props & {session: CollaborationSession; state: CollaborationState}>(function CollaborativeEditor({note, onSave, readOnly, session, state, onComment, onOpenComment, teamId}, bridge) {
   const modifiedTitle = useHintTitle('最后修改：' + (state.note?.modifiedBy ?? note.modifiedBy ?? '团队成员'));
   const latest = useRef(note), onSaveRef = useRef(onSave);
   useEffect(() => { onSaveRef.current = onSave; }, [onSave]);
@@ -60,7 +65,7 @@ const CollaborativeEditor = forwardRef<EditorBridge, Props & {session: Collabora
   const editor = useEditor({
     extensions: [StarterKit.configure({history: false, codeBlock: false}), TaskList, TaskItem.configure({nested: true}), EditorLink, EditorImage, ...documentExtensions(), ...interactionExtensions(),
       ImageUploads.configure({path: '/api/teams/' + teamId + '/notes/' + note.id + '/images'}),
-      Collaboration.configure({document: session.document}),
+      Collaboration.configure({document: session.document}), CommentAnchors,
       CollaborationCursor.configure({provider: session.provider, user: state.me,
         render: user => {
           const caret = document.createElement('span'); caret.className = 'collaboration-cursor__caret'; caret.style.borderColor = user.color;
@@ -74,6 +79,18 @@ const CollaborativeEditor = forwardRef<EditorBridge, Props & {session: Collabora
     onBlur: () => { session.setEditing(false); },
   });
   useEffect(() => { editor?.setEditable(!!editable); }, [editor, editable]);
+  // 带引用的评论在正文里高亮；点击高亮打开对应评论。评论有变化时立即刷新，另有低频兜底。
+  const openComment = useRef(onOpenComment);
+  useEffect(() => { openComment.current = onOpenComment; }, [onOpenComment]);
+  useEffect(() => {
+    if (!editor) return;
+    setCommentAnchorOpener(editor, id => openComment.current?.(id));
+    let active = true;
+    const load = () => { void api('/teams/' + teamId + '/notes/' + note.id + '/comment-anchors').then(data => { if (active && !editor.isDestroyed) setCommentAnchors(editor, data.anchors); }).catch(() => {}); };
+    const changed = (event: Event) => { if ((event as CustomEvent).detail?.noteId === note.id) load(); };
+    load(); const timer = setInterval(load, 60000); window.addEventListener('note-comments:changed', changed);
+    return () => { active = false; clearInterval(timer); window.removeEventListener('note-comments:changed', changed); };
+  }, [editor, teamId, note.id]);
   useEffect(() => { editor?.commands.updateUser(state.me); }, [editor, state.me]);
   useEffect(() => {
     const capture = (transaction: Y.Transaction) => {
@@ -116,7 +133,8 @@ const CollaborativeEditor = forwardRef<EditorBridge, Props & {session: Collabora
     if (!ok) Message.warning(state.error || '尚有内容未保存，请等待连接恢复后重试');
     return ok;
   }
-  useImperativeHandle(bridge, () => ({flush, snapshot: () => latest.current, hasChanges: () => session.hasChanges() || hasImageUploads(editor), draft: () => titleText.toString() + '\n\n' + (editor?.getText() ?? ''), command: action => editorAction(editor, action)}));
+  useImperativeHandle(bridge, () => ({flush, snapshot: () => latest.current, hasChanges: () => session.hasChanges() || hasImageUploads(editor), draft: () => titleText.toString() + '\n\n' + (editor?.getText() ?? ''), command: action => editorAction(editor, action),
+    anchors: {capture: () => editor ? captureAnchor(editor) : null, text: anchor => editor ? anchorText(editor.state, anchor) : undefined, reveal: (id, anchor) => !!editor && revealCommentAnchor(editor, id, anchor)}}));
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => { if (session.hasChanges() || hasImageUploads(editor)) { event.preventDefault(); event.returnValue = ''; } };
     window.addEventListener('beforeunload', warn);

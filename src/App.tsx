@@ -2,7 +2,7 @@ import {lazy, Suspense, useEffect, useRef, useState, type FormEvent, type Keyboa
 import {Outlet, useLocation, useMatches, useNavigate, useParams} from 'react-router-dom';
 import {Badge, Button, Card, Checkbox, Drawer, Dropdown, Empty, Input, List, Menu, Message, Modal, Select, Space, Spin, Tag, Tooltip, Typography} from '@arco-design/web-react';
 import {ArrowLeft, Clock, Bell, BookOpen, Check, CheckSquare, Edit3, FileCode2, FileText, Folder as FolderIcon, Mail, Menu as MenuIcon, MoreHorizontal, Pencil, Plus, RotateCcw, Search, Settings, Star, Trash2, History, Link as LinkIcon, MessageSquare, Upload, ListTree, Maximize2} from 'lucide-react';
-import {api, ApiError, isManager, type AppNotification, type Team, type EditorBridge, type Folder, type Note, type User} from './api';
+import {api, ApiError, isManager, type AppNotification, type CommentAnchor, type Team, type EditorBridge, type Folder, type Note, type User} from './api';
 import {AccountMenu} from './AccountMenu';
 import {NoteEditor} from './NoteEditor';
 import {SpaceSwitcher} from './SpaceSwitcher';
@@ -64,6 +64,9 @@ export function App() {
   const [spacesLoaded, setSpacesLoaded] = useState(false);
   const [spacesError, setSpacesError] = useState('');
   const [createTeamOpen, setCreateTeamOpen] = useState(false), [quickOpen, setQuickOpen] = useState(false), [scheduleNote, setScheduleNote] = useState<Note | null>(null);
+  // 选中文字后点「评论」时记下引用位置，写评论时带上；点击正文高亮时定位到对应评论。
+  const [pendingAnchor, setPendingAnchor] = useState<{noteId: string; anchor: CommentAnchor} | null>(null), [focusComment, setFocusComment] = useState<{noteId: string; id: string; nonce: number} | null>(null);
+  useEffect(() => { if (!activity) setPendingAnchor(null); }, [activity]);
   const [inviteToken, setInviteToken] = useState<string | null>(null), [draft, setDraft] = useState('');
   const [unreadCount, setUnreadCount] = useState(0);
   const currentTeam = teams.find(t => t.id === teamId && !t.deletedAt);
@@ -149,8 +152,8 @@ export function App() {
       }).catch(() => {});
     };
     const timer = setInterval(refresh, 30000);
-    window.addEventListener('focus', refresh);
-    return () => { active = false; clearInterval(timer); window.removeEventListener('focus', refresh); };
+    window.addEventListener('focus', refresh); window.addEventListener('note-comments:changed', refresh);
+    return () => { active = false; clearInterval(timer); window.removeEventListener('focus', refresh); window.removeEventListener('note-comments:changed', refresh); };
   }, [userId, teamId, view]);
   useEffect(() => { if (userId) void loadSpaces().catch(error => Message.error(error.message)); }, [userId]);
   useEffect(() => {
@@ -638,8 +641,9 @@ export function App() {
           {current.deletedAt ? <Menu.Item key="delete" disabled={current.canManage === false} className="note-menu-danger"><Ico Icon={Trash2} text="永久删除"/></Menu.Item> : <Menu.Item key="trash" disabled={current.canEdit === false} className="note-menu-danger"><Ico Icon={Trash2} text="删除"/></Menu.Item>}
         </Menu>}><Button aria-label={(current.unreadComments ?? 0) > 0 ? '备忘录更多操作（有未读评论）' : '备忘录更多操作'} className={(current.unreadComments ?? 0) > 0 ? 'has-unread' : undefined} type="text" size="small" icon={<MoreHorizontal size={18}/>} disabled={batchBusy}/></Dropdown>
       </Space></div>
-      <NoteEditor user={user!} teamId={teamId} key={(teamId ?? 'personal') + current.id} note={current} onSave={upsert} ref={editorRef} readOnly={batchBusy || current.canEdit === false} onComment={teamId && !current.deletedAt ? () => void safeSwitch(() => setActivity('comments')) : undefined}/>
-      {activity && <Suspense fallback={null}><NoteActivity key={(teamId ?? 'personal') + current.id + activity} note={current} teamId={teamId} user={user} tab={activity} bridge={() => editorRef.current} onSave={upsert} onStats={(total, unread) => setNotes(items => items.map(item => item.id === current.id && (item.commentCount !== total || item.unreadComments !== unread) ? {...item, commentCount: total, unreadComments: unread} : item))} onClose={() => setActivity(null)}/></Suspense>}
+      <NoteEditor user={user!} teamId={teamId} key={(teamId ?? 'personal') + current.id} note={current} onSave={upsert} ref={editorRef} readOnly={batchBusy || current.canEdit === false} onComment={teamId && !current.deletedAt ? () => { const anchor = editorRef.current?.anchors?.capture() ?? null; setPendingAnchor(anchor ? {noteId: current.id, anchor} : null); void safeSwitch(() => setActivity('comments')); } : undefined}
+        onOpenComment={teamId && !current.deletedAt ? id => { setFocusComment({noteId: current.id, id, nonce: Date.now()}); void safeSwitch(() => setActivity('comments')); } : undefined}/>
+      {activity && <Suspense fallback={null}><NoteActivity key={(teamId ?? 'personal') + current.id + activity} note={current} teamId={teamId} user={user} tab={activity} bridge={() => editorRef.current} pendingAnchor={pendingAnchor?.noteId === current.id ? pendingAnchor.anchor : null} onAnchorUsed={() => setPendingAnchor(null)} focusComment={focusComment?.noteId === current.id ? focusComment : null} onSave={upsert} onStats={(total, unread) => setNotes(items => items.map(item => item.id === current.id && (item.commentCount !== total || item.unreadComments !== unread) ? {...item, commentCount: total, unreadComments: unread} : item))} onClose={() => setActivity(null)}/></Suspense>}
     </> : <div className="editor-empty"><Empty description="留一点空间，给灵感"/><Button type="primary" icon={<Plus size={16}/>} disabled={!canCreate} onClick={() => void newNote()}>新建备忘录</Button></div>}</main></>,
     }}/>
     </Suspense>

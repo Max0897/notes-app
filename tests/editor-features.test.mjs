@@ -103,6 +103,49 @@ try {
   } finally {ca.destroy();cb.destroy();a.destroy();b.destroy();}
   console.log('PASS 表格/高亮协作、替换同步，查找状态不广播');
 
+  {
+    const {CommentAnchors, anchorText, captureAnchor, resolveAnchor, setCommentAnchors, setCommentAnchorOpener, revealCommentAnchor} = await import('../src/editorCommentAnchors.ts');
+    const x = new Y.Doc(), y = new Y.Doc();
+    x.on('update', (update, origin) => {if (origin !== y) Y.applyUpdate(y, update, x);});
+    y.on('update', (update, origin) => {if (origin !== x) Y.applyUpdate(x, update, y);});
+    const ex = make({extensions:[StarterKit.configure({history:false, codeBlock:false}), ...documentExtensions(), Collaboration.configure({document:x}), CommentAnchors]});
+    const ey = make({extensions:[StarterKit.configure({history:false, codeBlock:false}), ...documentExtensions(), Collaboration.configure({document:y})]});
+    try {
+      ex.commands.setContent('<p>前面的文字，被评论的这一段，后面的文字</p>'); await delay(20);
+      const text = ex.getText(), from = 1 + text.indexOf('被评论的这一段'), to = from + '被评论的这一段'.length;
+      assert.equal(captureAnchor(ex), null, '没有选区时不生成引用');
+      ex.commands.setTextSelection({from, to});
+      const anchor = captureAnchor(ex);
+      assert.equal(anchor.quote, '被评论的这一段');
+      assert.deepEqual(resolveAnchor(ex.state, anchor), {from, to});
+      assert.equal(anchorText(ex.state, anchor), '被评论的这一段');
+      // JSON 往返后仍可解析（保存到数据库再读出的形式）。
+      assert.deepEqual(resolveAnchor(ex.state, JSON.parse(JSON.stringify(anchor))), {from, to});
+      let opened = null; setCommentAnchorOpener(ex, id => {opened = id;});
+      setCommentAnchors(ex, [{id: 'c1', anchor}]);
+      assert.equal(ex.view.dom.querySelector('.comment-anchor')?.textContent, '被评论的这一段', '正文中高亮引用的文字');
+      assert.equal(ex.view.dom.querySelector('.comment-anchor')?.getAttribute('data-comment-id'), 'c1');
+
+      // 另一位协作者在前面插入文字：锚点随之后移，高亮仍对准原文。
+      ey.commands.insertContentAt(1, '新增'); await delay(30);
+      assert.deepEqual(resolveAnchor(ex.state, anchor), {from: from + 2, to: to + 2});
+      assert.equal(ex.view.dom.querySelector('.comment-anchor')?.textContent, '被评论的这一段');
+      // 在引用文字中间编辑：范围随之变化，仍有效。
+      ey.commands.insertContentAt(from + 2 + 3, '【插入】'); await delay(30);
+      assert.equal(ex.state.doc.textBetween(...Object.values(resolveAnchor(ex.state, anchor))), '被评论【插入】的这一段');
+      assert.equal(anchorText(ex.state, anchor), '被评论【插入】的这一段', '正文被修改后，引用显示当前的文字');
+      assert.equal(revealCommentAnchor(ex, 'c1', anchor), true); assert.equal(ex.view.dom.querySelector('.comment-anchor.is-active')?.getAttribute('data-comment-id'), 'c1');
+      // 引用文字被整段删除：位置塌缩，视为原文已不存在，高亮消失，定位返回 false。
+      const now = resolveAnchor(ex.state, anchor);
+      ey.commands.deleteRange({from: now.from, to: now.to}); await delay(30);
+      assert.equal(resolveAnchor(ex.state, anchor), null); assert.equal(anchorText(ex.state, anchor), null);
+      assert.equal(ex.view.dom.querySelector('.comment-anchor'), null);
+      assert.equal(revealCommentAnchor(ex, 'c1', anchor), false);
+      assert.equal(opened, null);
+    } finally {ex.destroy();ey.destroy();x.destroy();y.destroy();}
+    console.log('PASS 评论引用：捕获、协作编辑后位置跟随、高亮、删除后失效');
+  }
+
   editor.commands.setContent('<h1>一级</h1><p>正文</p><h3>三级</h3>');
   assert.deepEqual(documentOutline(editor.state.doc).map(item => [item.level,item.text]), [[1,'一级'],[3,'三级']]);
   root.render(React.createElement(EditorTools, {editor, disabled:false})); await delay(120);

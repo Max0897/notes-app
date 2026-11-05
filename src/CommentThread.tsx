@@ -1,6 +1,6 @@
 import {useEffect, useState, type ReactNode} from 'react';
 import {Button, Modal, Typography} from '@arco-design/web-react';
-import {api, displayName, type User} from './api';
+import {api, displayName, type CommentAnchor, type User} from './api';
 import {UserAvatar} from './UserAvatar';
 import {CommentText} from './CommentText';
 import {fullTime, relativeTime} from './relativeTime';
@@ -8,27 +8,28 @@ import type {MentionMember, MentionRange} from './commentMentions';
 
 export type NoteComment = User & {
   userId: string; body: string; mentions: string[]; mentionRanges?: MentionRange[]; createdAt: string;
-  threadId?: string | null; replyCount?: number; recentReplies?: NoteComment[];
+  threadId?: string | null; replyCount?: number; recentReplies?: NoteComment[]; anchor?: CommentAnchor | null;
   replyTo?: {id: string; userId: string; username: string; nickname: string} | null;
 };
 export type ReplyTarget = {id: string; threadId: string; name: string};
 type Props = {
   comment: NoteComment; path: string; members: MentionMember[]; userId: string;
   editable: boolean; canManage: boolean; busy: boolean; supportsReplies: boolean;
-  expanded: boolean; onToggle: () => void; refresh: number;
+  expanded: boolean; onToggle: () => void; refresh: number; anchorText: (anchor: CommentAnchor) => string | null | undefined; onJump: (comment: NoteComment) => void;
   onReply: (target: ReplyTarget) => void; onDelete: (id: string) => Promise<boolean>;
 };
-function CommentEntry({comment, members, nested, actions}: {comment: NoteComment; members: MentionMember[]; nested?: boolean; actions: ReactNode}) {
+function CommentEntry({comment, members, nested, actions, quote}: {comment: NoteComment; members: MentionMember[]; nested?: boolean; actions: ReactNode; quote?: ReactNode}) {
   return <div className="comment-item">
     <UserAvatar user={{...comment, id: comment.userId}} size={nested ? 24 : 32}/>
     <div className="comment-content">
       <div className="comment-author"><strong>{displayName(comment)}</strong>{nested && comment.replyTo && <span> 回复 <strong>{displayName(comment.replyTo)}</strong></span>}</div>
+      {quote}
       <div className="comment-body"><CommentText body={comment.body} mentions={comment.mentions} mentionRanges={comment.mentionRanges} members={members}/></div>
       <div className="comment-meta"><Typography.Text type="secondary" title={fullTime(comment.createdAt)}>{relativeTime(comment.createdAt)}</Typography.Text><div className="comment-actions">{actions}</div></div>
     </div>
   </div>;
 }
-export function CommentThread({comment, path, members, userId, editable, canManage, busy, supportsReplies, expanded, onToggle, refresh, onReply, onDelete}: Props) {
+export function CommentThread({comment, path, members, userId, editable, canManage, busy, supportsReplies, expanded, onToggle, refresh, anchorText, onJump, onReply, onDelete}: Props) {
   // 折叠时直接使用列表接口附带的最近两条回复（时间正序），不额外请求；展开后再分页加载全部。
   const recent = comment.recentReplies ?? [], total = comment.replyCount ?? 0;
   const [loaded, setLoaded] = useState<NoteComment[]>([]);
@@ -53,7 +54,7 @@ export function CommentThread({comment, path, members, userId, editable, canMana
       } catch (error) { if (active) setError((error as Error).message); }
       finally { if (active) setLoading(false); }
     }
-    void load(); const timer = setInterval(load, 10000);
+    void load(); const timer = setInterval(load, 30000);
     return () => { active = false; clearInterval(timer); };
   }, [expanded, pages, path, comment.id, comment.replyCount, refresh, retry]);
   function confirmDelete(item: NoteComment) {
@@ -70,8 +71,14 @@ export function CommentThread({comment, path, members, userId, editable, canMana
     </>;
   }
   const showAll = expanded && loaded.length > 0, shown = showAll ? loaded : recent, hidden = Math.max(0, total - shown.length);
-  return <article className="comment-thread">
-    <CommentEntry comment={comment} members={members} actions={actions(comment)}/>
+  // 引用的原文：位置仍有效时显示正文里当前的文字，点击可定位；原文被删除时只显示当时引用的文字。
+  const current = comment.anchor ? anchorText(comment.anchor) : undefined;
+  const quote = comment.anchor ? current !== null
+    ? <button type="button" className="comment-quote" title={current !== undefined && current !== comment.anchor.quote ? '评论时的原文：' + comment.anchor.quote : '定位到正文'} onClick={() => onJump(comment)}><span>{current ?? comment.anchor.quote}</span></button>
+    : <div className="comment-quote is-lost" title={comment.anchor.quote}><Typography.Text type="secondary">原文已被修改或删除</Typography.Text><span>{comment.anchor.quote}</span></div>
+    : null;
+  return <article className="comment-thread" data-comment-id={comment.id}>
+    <CommentEntry comment={comment} members={members} actions={actions(comment)} quote={quote}/>
     {supportsReplies && (total > 0 || expanded) && <div className="comment-replies">
       {expanded && next && <Button className="comment-replies-toggle" type="text" size="mini" loading={loading} disabled={busy} onClick={() => setPages(value => value + 1)}>加载更早回复</Button>}
       {expanded && loading && !loaded.length && !error && <Typography.Paragraph type="secondary" role="status">加载回复中…</Typography.Paragraph>}
