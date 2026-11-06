@@ -42,11 +42,17 @@ const COOKIE_NAME = secureCookies ? '__Host-notes_session' : 'notes_session';
 // 注册一律为邀请制：服务器上尚无账号时首个账号免邀请码，其余凭已注册满 24 小时用户的个人邀请码。
 // 另有「每日新增账号数」全站上限兜底。仅测试进程（NODE_ENV=test）可用 TEST_OPEN_REGISTRATION 跳过邀请码。
 const testOpenRegistration = process.env.NODE_ENV === 'test' && process.env.TEST_OPEN_REGISTRATION === 'true';
-const registrationDailyLimit = Number(process.env.REGISTRATION_DAILY_LIMIT || '20');
-if (!Number.isInteger(registrationDailyLimit) || registrationDailyLimit < 1) throw new Error('REGISTRATION_DAILY_LIMIT 必须是不小于 1 的整数');
+// 空字符串与未设置同义（compose 里 `VAR: ""`、测试里显式清空都按默认值处理）。
+function positiveIntEnv(name: string, fallback: number) {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === '') return fallback;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1) throw new Error(`${name} 必须是不小于 1 的整数`);
+  return value;
+}
+const registrationDailyLimit = positiveIntEnv('REGISTRATION_DAILY_LIMIT', 20);
 // 每人每天（北京时间）最多邀请的人数，防止一个邀请码占满全站名额。
-const inviteDailyLimit = Number(process.env.INVITE_DAILY_LIMIT_PER_USER || '5');
-if (!Number.isInteger(inviteDailyLimit) || inviteDailyLimit < 1) throw new Error('INVITE_DAILY_LIMIT_PER_USER 必须是不小于 1 的整数');
+const inviteDailyLimit = positiveIntEnv('INVITE_DAILY_LIMIT_PER_USER', 5);
 const INVITE_MIN_ACCOUNT_AGE = 24 * 60 * 60 * 1000;
 const MAX_BODY_BYTES = 1024 * 1024;
 const MAX_CONTENT_BYTES = 512 * 1024;
@@ -576,7 +582,9 @@ function inviteState(userId: string) {
   const eligibleAt = new Date(Date.parse(row.created_at) + INVITE_MIN_ACCOUNT_AGE).toISOString();
   const base = { eligibleAt, dailyLimit: inviteDailyLimit };
   if (Date.now() < Date.parse(eligibleAt)) return { ...base, eligible: false, code: null, invitedToday: 0, invitees: [] };
-  const invitees = db.prepare('SELECT nickname, created_at AS createdAt FROM users WHERE invited_by = ? ORDER BY created_at DESC, id LIMIT 100').all(userId);
+  const invitees = db.prepare(`SELECT ${publicUserColumns}, users.created_at AS createdAt FROM users
+    LEFT JOIN user_avatars ON user_avatars.user_id = users.id
+    WHERE users.invited_by = ? ORDER BY users.created_at DESC, users.id LIMIT 100`).all(userId);
   return { ...base, eligible: true, code: row.invite_code ?? assignInviteCode(userId), invitedToday: invitedToday(userId), invitees };
 }
 app.get('/api/invite', requireAuth, (c) => c.json(inviteState(c.get('user')!.id)));

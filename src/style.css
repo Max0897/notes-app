@@ -155,6 +155,14 @@ body{overflow:hidden}
 .user-avatar{flex:none;background:var(--color-fill-2)}
 .avatar-settings{display:flex;align-items:center;gap:16px;padding:4px 0}
 .avatar-settings>.arco-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.invitee-summary{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.invitee-list{display:flex;flex-direction:column;max-height:420px;overflow-y:auto}
+.invitee-row{display:flex;align-items:center;gap:12px;padding:12px 0;border-top:1px solid var(--color-border-2);min-width:0}
+.invitee-row:first-child{border-top:0;padding-top:4px}
+.invitee-info{display:flex;flex:1;flex-direction:column;min-width:0;overflow-wrap:anywhere}
+.invitee-name{font-size:14px;line-height:22px}
+.invitee-meta{font-size:12px;line-height:20px}
+.invitee-empty{padding:24px 0}
 .boot{height:100%;display:flex;align-items:center;justify-content:center}
 
 /* ---------- Tiptap 正文基础排版 ---------- */
