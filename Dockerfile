@@ -15,7 +15,18 @@ WORKDIR /app
 ARG HTTP_PROXY
 ARG HTTPS_PROXY
 
-RUN apt-get update \
+# Debian 源默认走 deb.debian.org。在中国大陆的机器上这个域名常常很慢甚至不可用，
+# 此时用 --build-arg APT_MIRROR=mirrors.tencentyun.com（或 mirrors.aliyun.com 等）换源。
+# 留空保持默认行为，不影响其他地区的构建。
+ARG APT_MIRROR=""
+
+RUN if [ -n "$APT_MIRROR" ]; then \
+      sed -i "s|deb.debian.org|$APT_MIRROR|g; s|security.debian.org|$APT_MIRROR|g" \
+        /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+      sed -i "s|deb.debian.org|$APT_MIRROR|g; s|security.debian.org|$APT_MIRROR|g" \
+        /etc/apt/sources.list; \
+    fi \
+ && apt-get update \
  && apt-get install -y --no-install-recommends python3 make g++ \
  && rm -rf /var/lib/apt/lists/*
 

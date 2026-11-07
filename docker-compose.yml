@@ -2,11 +2,14 @@ services:
   notes-app:
     build:
       context: .
-      # 构建时网络需要走代理的话，解开下面三行。
-      # host.docker.internal 在 Docker Desktop 上指向宿主机。
-      # args:
-      #   HTTP_PROXY: http://host.docker.internal:7897
-      #   HTTPS_PROXY: http://host.docker.internal:7897
+      args:
+        # 中国大陆机器构建时 apt 常常很慢，可用环境变量换源：
+        #   APT_MIRROR=mirrors.tencentyun.com docker compose build
+        APT_MIRROR: "${APT_MIRROR:-}"
+        # 构建时网络需要走代理的话，解开下面两行。
+        # host.docker.internal 在 Docker Desktop 上指向宿主机。
+        # HTTP_PROXY: http://host.docker.internal:7897
+        # HTTPS_PROXY: http://host.docker.internal:7897
     image: notes-app:latest
     container_name: notes-app
     restart: unless-stopped
