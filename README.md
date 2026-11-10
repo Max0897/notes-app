@@ -418,6 +418,8 @@ proxy_buffering off;
 
 前置 CDN 若需要按真实客户端 IP 限流，可在 Compose 中将 `TRUSTED_PROXY_IPS` 设置为容器实际看到的隧道／代理对端地址（同机 Nginx 反向代理时就是 `127.0.0.1`，Cloudflare Tunnel 则是核实后的 Docker 网关 IP）。只有该代理能够访问应用入口、并确保传入的 `EO-Connecting-IP` ／ `CF-Connecting-IP` 由 CDN 提供时才应启用；不要信任任意来源或直接使用客户端提交的 `X-Forwarded-For`。保持回环端口绑定，不要为此扩大端口暴露范围。
 
+注意端口映射会改写对端地址：容器通过 `ports:` 暴露时，宿主机 Nginx 转发进来的请求在容器内看到的对端是 Docker 网关（如 `172.19.0.1`）而不是 `127.0.0.1`，此时 `TRUSTED_PROXY_IPS` 要填网关地址，否则应用会忽略转发头、把全站限流合并成同一个桶。用 `docker exec <容器> cat /proc/net/route` 或 `docker network inspect <项目>_default` 确认网关，并在 Compose 里用 `networks.default.ipam.config` 固定子网，避免网络重建后地址漂移。
+
 仅页面通过 HTTPS 访问时启用 `SECURE_COOKIES=true`。如果代理会改写 Host，务必设置 `PUBLIC_ORIGIN` 为浏览器实际访问的完整来源（协议、域名及必要端口，不带路径），否则写请求可能返回 403。
 
 ### 构建代理与原生依赖
