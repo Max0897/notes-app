@@ -28,6 +28,10 @@ services:
       TRUSTED_PROXY_IPS: ""
       # 本地开发用：设为 true 可让 Webhook 访问 127.0.0.1 与内网地址（容器内访问宿主机用 host.docker.internal）。公网服务器上不要开启。
       WEBHOOK_ALLOW_PRIVATE: "${WEBHOOK_ALLOW_PRIVATE:-false}"
+      # 注册为邀请制：首个账号无需邀请码，其余账号凭已注册满 24 小时用户的个人邀请码。
+      # 全站每日（北京时间）新增账号上限，以及每个用户每天最多邀请的人数。
+      REGISTRATION_DAILY_LIMIT: "${REGISTRATION_DAILY_LIMIT:-20}"
+      INVITE_DAILY_LIMIT_PER_USER: "${INVITE_DAILY_LIMIT_PER_USER:-5}"
       IMAGE_PERSONAL_LIMIT_MB: "${IMAGE_PERSONAL_LIMIT_MB:-200}"
       IMAGE_TEAM_LIMIT_MB: "${IMAGE_TEAM_LIMIT_MB:-1024}"
       IMAGE_USER_DAILY_MB: "${IMAGE_USER_DAILY_MB:-100}"

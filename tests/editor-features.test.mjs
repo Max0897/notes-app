@@ -146,6 +146,33 @@ try {
     console.log('PASS 评论引用：捕获、协作编辑后位置跟随、高亮、删除后失效');
   }
 
+  {
+    // 文档以表格、图片或分割线结尾时，末尾自动保留一个空段落，保证下方始终有位置可以继续输入。
+    const {EditorImage} = await import('../src/editorImages.ts');
+    const image = {type: 'image', attrs: {src: '/api/images/11111111-1111-4111-8111-111111111111', imageId: '11111111-1111-4111-8111-111111111111'}};
+    const para = text => ({type: 'paragraph', content: [{type: 'text', text}]});
+    const trailing = (content, options = {}) => make({extensions: [StarterKit.configure({codeBlock: false}), EditorImage, ...documentExtensions()], content: {type: 'doc', content}, ...options});
+    const lastType = e => e.state.doc.lastChild.type.name;
+    for (const [name, node] of [['image', image], ['horizontalRule', {type: 'horizontalRule'}], ['table', {type: 'table', content: [{type: 'tableRow', content: [{type: 'tableCell', content: [{type: 'paragraph'}]}]}]}]]) {
+      const e = trailing([para('前文'), node]);
+      try {
+        assert.equal(lastType(e), name, '初始内容以 ' + name + ' 结尾，尚未发生交互');
+        e.commands.focus('end'); await delay(10);
+        assert.equal(lastType(e), 'paragraph', name + ' 结尾时应自动补一个空段落');
+        assert.equal(e.state.doc.childCount, 3);
+        e.commands.focus('end'); e.commands.insertContent('继续输入'); await delay(10);
+        assert.equal(e.state.doc.lastChild.textContent, '继续输入', '可以在 ' + name + ' 后面继续输入');
+        assert.equal(e.state.doc.childCount, 3, '不会重复补段落');
+      } finally {e.destroy();}
+    }
+    // 文字结尾的文档保持不变；只读时不补，避免修改内容。
+    const plain = trailing([para('只有文字')]); try { plain.commands.focus('end'); await delay(10); assert.equal(plain.state.doc.childCount, 1); } finally {plain.destroy();}
+    const locked = trailing([para('前文'), image], {editable: false}); try { locked.view.dispatch(locked.state.tr.setMeta('x', 1)); await delay(10); assert.equal(lastType(locked), 'image'); } finally {locked.destroy();}
+    // 删除末尾空段落后，下一次交互会再补回来。
+    const again = trailing([para('前文'), image]); try { again.commands.focus('end'); await delay(10); again.commands.deleteRange({from: again.state.doc.content.size - 2, to: again.state.doc.content.size}); await delay(10); assert.equal(lastType(again), 'paragraph'); } finally {again.destroy();}
+    console.log('PASS 以图片、分割线、表格结尾时自动保留末尾空段落');
+  }
+
   editor.commands.setContent('<h1>一级</h1><p>正文</p><h3>三级</h3>');
   assert.deepEqual(documentOutline(editor.state.doc).map(item => [item.level,item.text]), [[1,'一级'],[3,'三级']]);
   root.render(React.createElement(EditorTools, {editor, disabled:false})); await delay(120);

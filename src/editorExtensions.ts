@@ -22,8 +22,8 @@ const EditorTable = Table.extend({
     }};
   },
 });
-// A table as the last node leaves no caret position below it, so keep an empty paragraph there.
-// Remote Yjs transactions are skipped; every client adds it only on its own interaction.
+// A table or a leaf block (image, horizontal rule) as the last node leaves no caret position below it,
+// so keep an empty paragraph there. Remote Yjs transactions are skipped; every client adds it only on its own interaction.
 const TrailingParagraph = Extension.create({
   name: 'trailingParagraph',
   addProseMirrorPlugins() {
@@ -32,7 +32,7 @@ const TrailingParagraph = Extension.create({
       appendTransaction: (transactions, _old, state) => {
         if (!this.editor.isEditable || transactions.some(tr => tr.getMeta('y-sync$')?.isChangeOrigin)) return null;
         const last = state.doc.lastChild, paragraph = state.schema.nodes.paragraph;
-        if (last?.type.name !== 'table' || !paragraph) return null;
+        if (!last || !paragraph || !(last.isLeaf || last.type.name === 'table')) return null;
         return state.tr.insert(state.doc.content.size, paragraph.create());
       },
     })];

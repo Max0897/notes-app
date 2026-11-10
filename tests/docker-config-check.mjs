@@ -143,7 +143,8 @@ for (const must of ['node_modules', 'dist', 'dist-server', 'data', '.git']) {
 
 section('环境变量：后端读取 vs 镜像/编排声明');
 const serverSource = readFileSync(resolve(root, 'server/index.ts'), 'utf8');
-const usedByServer = [...new Set([...serverSource.matchAll(/process\.env\.([A-Z_][A-Z0-9_]*)/g)].map((m) => m[1]))].sort();
+// TEST_ 开头的变量只在 NODE_ENV=test 的测试进程里生效，生产环境无法开启，不属于部署配置，不要求声明或写入文档。
+const usedByServer = [...new Set([...serverSource.matchAll(/process\.env\.([A-Z_][A-Z0-9_]*)/g)].map((m) => m[1]))].filter((name) => !name.startsWith('TEST_')).sort();
 check(usedByServer.length > 0, `识别到后端读取的环境变量：${usedByServer.join(', ')}`);
 
 const dockerfileText = dockerfileLines.join('\n');

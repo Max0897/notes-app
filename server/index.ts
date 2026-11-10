@@ -42,10 +42,10 @@ const COOKIE_NAME = secureCookies ? '__Host-notes_session' : 'notes_session';
 // 注册一律为邀请制：服务器上尚无账号时首个账号免邀请码，其余凭已注册满 24 小时用户的个人邀请码。
 // 另有「每日新增账号数」全站上限兜底。仅测试进程（NODE_ENV=test）可用 TEST_OPEN_REGISTRATION 跳过邀请码。
 const testOpenRegistration = process.env.NODE_ENV === 'test' && process.env.TEST_OPEN_REGISTRATION === 'true';
-const registrationDailyLimit = Number(process.env.REGISTRATION_DAILY_LIMIT ?? '20');
+const registrationDailyLimit = Number(process.env.REGISTRATION_DAILY_LIMIT || '20');
 if (!Number.isInteger(registrationDailyLimit) || registrationDailyLimit < 1) throw new Error('REGISTRATION_DAILY_LIMIT 必须是不小于 1 的整数');
 // 每人每天（北京时间）最多邀请的人数，防止一个邀请码占满全站名额。
-const inviteDailyLimit = Number(process.env.INVITE_DAILY_LIMIT_PER_USER ?? '5');
+const inviteDailyLimit = Number(process.env.INVITE_DAILY_LIMIT_PER_USER || '5');
 if (!Number.isInteger(inviteDailyLimit) || inviteDailyLimit < 1) throw new Error('INVITE_DAILY_LIMIT_PER_USER 必须是不小于 1 的整数');
 const INVITE_MIN_ACCOUNT_AGE = 24 * 60 * 60 * 1000;
 const MAX_BODY_BYTES = 1024 * 1024;

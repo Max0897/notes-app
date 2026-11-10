@@ -99,10 +99,10 @@ test('机器人请求：三家的消息体、加签与关键词', () => {
   const wecom = buildRobotRequest('wecom', new URL('https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=k'), message);
   assert.deepEqual(JSON.parse(wecom.body), {msgtype: 'text', text: {content: '标题\n内容'}});
   const now = 1_700_000_000_000;
-  const ding = buildRobotRequest('dingtalk', new URL('https://oapi.dingtalk.com/robot/send?access_token=t'), message, {secret: 'SEC', keyword: '备忘', now});
+  const ding = buildRobotRequest('dingtalk', new URL('https://oapi.dingtalk.com/robot/send?access_token=t'), message, {secret: 'SEC', keyword: '提醒', now});
   assert.equal(ding.url.searchParams.get('access_token'), 't'); assert.equal(ding.url.searchParams.get('timestamp'), String(now));
   assert.equal(ding.url.searchParams.get('sign'), createHmac('sha256', 'SEC').update(`${now}\nSEC`).digest('base64'));
-  assert.equal(JSON.parse(ding.body).text.content, '备忘\n标题\n内容');
+  assert.equal(JSON.parse(ding.body).text.content, '提醒\n标题\n内容');
   assert.equal(JSON.parse(buildRobotRequest('dingtalk', new URL('https://oapi.dingtalk.com/robot/send?access_token=t'), message).body).text.content, '标题\n内容');
   const feishu = JSON.parse(buildRobotRequest('feishu', new URL('https://open.feishu.cn/open-apis/bot/v2/hook/12345678'), message, {secret: 'SEC', now}).body);
   assert.equal(feishu.timestamp, '1700000000'); assert.equal(feishu.msg_type, 'text'); assert.equal(feishu.content.text, '标题\n内容');
@@ -149,7 +149,7 @@ async function fixture(t, env = {}) {
     child.stdout.on('data', d => { output += d; const port = output.match(/监听 127\.0\.0\.1:(\d+)/)?.[1]; if (port) { clearTimeout(timer); resolveOrigin('http://127.0.0.1:' + port); } });
   });
   async function r(who, path, method = 'GET', body, status = 200) {
-    const response = await fetch(origin + '/api' + path, {method, headers: {Origin: origin, 'Content-Type': 'application/json', ...(who ? {Cookie: who.cookie} : {})}, body: body === undefined ? undefined : JSON.stringify(body)});
+    const response = await fetch(origin + '/api' + path, {method, headers: {Origin: 'https://notes.example.com', 'Content-Type': 'application/json', ...(who ? {Cookie: who.cookie} : {})}, body: body === undefined ? undefined : JSON.stringify(body)});
     const json = await response.json(); assert.equal(response.status, status, path + ': ' + JSON.stringify(json));
     return {...json, cookie: response.headers.get('set-cookie')?.split(';')[0]};
   }
@@ -173,12 +173,12 @@ test('机器人：增删改、加签与关键词、测试推送与用户隔离',
   const wecom = (await r(owner, '/webhooks', 'POST', {type: 'wecom', name: '企业微信群', url: receiverUrl + '?key=abc'}, 201)).webhook;
   assert.equal(wecom.type, 'wecom'); assert.equal(wecom.url, receiverUrl + '?key=abc'); assert.equal(wecom.hasSecret, false);
   await r(owner, '/webhooks', 'POST', {type: 'wecom', name: '加签', url: receiverUrl, secret: 'x'}, 400);
-  await r(owner, '/webhooks', 'POST', {type: 'wecom', name: '关键词', url: receiverUrl, keyword: '备忘'}, 400);
+  await r(owner, '/webhooks', 'POST', {type: 'wecom', name: '关键词', url: receiverUrl, keyword: '提醒'}, 400);
   await r(owner, '/webhooks', 'POST', {type: 'custom', name: '自定义', url: receiverUrl}, 400);
   await r(owner, '/webhooks', 'POST', {name: '缺类型', url: receiverUrl}, 400);
   await r(owner, '/webhooks', 'POST', {type: 'wecom', name: '', url: receiverUrl}, 400);
-  const feishu = (await r(owner, '/webhooks', 'POST', {type: 'feishu', name: '飞书群', url: receiverUrl, secret: 'FEI-SECRET', keyword: '备忘'}, 201)).webhook;
-  assert.equal(feishu.hasSecret, true); assert.equal(feishu.keyword, '备忘');
+  const feishu = (await r(owner, '/webhooks', 'POST', {type: 'feishu', name: '飞书群', url: receiverUrl, secret: 'FEI-SECRET', keyword: '提醒'}, 201)).webhook;
+  assert.equal(feishu.hasSecret, true); assert.equal(feishu.keyword, '提醒');
   assert.equal(JSON.stringify(await r(owner, '/webhooks')).includes('FEI-SECRET'), false, '加签密钥不应回显');
   const dingtalk = (await r(owner, '/webhooks', 'POST', {type: 'dingtalk', name: '钉钉群', url: receiverUrl + '?access_token=tok', secret: 'DING-SECRET'}, 201)).webhook;
   assert.deepEqual((await r(other, '/webhooks')).webhooks, []);
@@ -192,7 +192,7 @@ test('机器人：增删改、加签与关键词、测试推送与用户隔离',
 
   await r(owner, '/webhooks/' + feishu.id + '/test', 'POST', {});
   const sentFeishu = received.at(-1).body;
-  assert.equal(sentFeishu.msg_type, 'text'); assert.match(contentOf(sentFeishu), /^备忘\n/, '应补上关键词');
+  assert.equal(sentFeishu.msg_type, 'text'); assert.match(contentOf(sentFeishu), /^提醒\n/, '应补上关键词');
   assert.equal(sentFeishu.sign, createHmac('sha256', `${sentFeishu.timestamp}\nFEI-SECRET`).update('').digest('base64'));
 
   await r(owner, '/webhooks/' + dingtalk.id + '/test', 'POST', {});
