@@ -242,10 +242,11 @@ test('已登录 API 配额按用户隔离，共享代理不互相占用额度', 
   await request('/health', {cookie: b});
 });
 
-for (const trusted of [false, true]) test(`代理 IP：${trusted ? '显式白名单允许 Cloudflare 客户端 IP' : '未信任来源不能伪造转发头绕过限流'}`, {timeout: 60000}, async t => {
+// 两种前置代理都支持：Cloudflare 的 CF-Connecting-IP、腾讯 EdgeOne 的 EO-Connecting-IP。
+for (const header of ['CF-Connecting-IP', 'EO-Connecting-IP']) for (const trusted of [false, true]) test(`代理 IP（${header}）：${trusted ? '显式白名单允许代理传来的客户端 IP' : '未信任来源不能伪造转发头绕过限流'}`, {timeout: 60000}, async t => {
   const {request} = await fixture(t, {TRUSTED_PROXY_IPS: trusted ? '127.0.0.1' : ''});
   for (let i = 0; i < 181; i++) {
     const ip = '198.51.100.' + (i + 1);
-    await request('/health', {headers: {'CF-Connecting-IP': ip, 'X-Forwarded-For': ip}, status: !trusted && i === 180 ? 429 : 200});
+    await request('/health', {headers: {[header]: ip, 'X-Forwarded-For': ip}, status: !trusted && i === 180 ? 429 : 200});
   }
 });

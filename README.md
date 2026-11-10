@@ -334,7 +334,7 @@ npm run dev
 | `NODE_ENV` | 未设置 | 设置为 `production` 时默认启用安全 Cookie |
 | `SECURE_COOKIES` | 跟随 `NODE_ENV` | `true` 启用 `Secure` 和 `__Host-` Cookie；直接使用 HTTP 时设为 `false` |
 | `PUBLIC_ORIGIN` | 空 | 唯一允许的网页来源，如 `https://notes.example.com`；留空时比较 `Origin` 与请求 Host |
-| `TRUSTED_PROXY_IPS` | 空 | 可选的受信任代理 TCP 对端 IP 白名单，逗号分隔；只有白名单中的来源可使用 `CF-Connecting-IP`，默认忽略全部转发头 |
+| `TRUSTED_PROXY_IPS` | 空 | 可选的受信任代理 TCP 对端 IP 白名单，逗号分隔；只有白名单中的来源可使用 `EO-Connecting-IP`（腾讯 EdgeOne）或 `CF-Connecting-IP`（Cloudflare），默认忽略全部转发头 |
 | `INVITE_DAILY_LIMIT_PER_USER` | `5` | 邀请制下每个用户每天（北京时间）最多邀请的人数，不小于 1 的整数 |
 | `REGISTRATION_DAILY_LIMIT` | `20` | 全站每日（北京时间 00:00 重置）新增账号上限，所有模式生效；不小于 1 的整数 |
 | `IMAGE_PERSONAL_LIMIT_MB` | `200` | 每个个人空间的图片容量 |
@@ -416,7 +416,7 @@ proxy_read_timeout 3600s;
 proxy_buffering off;
 ```
 
-Cloudflare Tunnel 若需要按真实客户端 IP 限流，可在 Compose 中将 `TRUSTED_PROXY_IPS` 设置为容器实际看到的隧道／代理对端地址（例如核实后的 Docker 网关 IP）。只有该代理能够访问应用入口、并确保传入的 `CF-Connecting-IP` 由 Cloudflare 提供时才应启用；不要信任任意来源或直接使用客户端提交的 `X-Forwarded-For`。保持回环端口绑定，不要为此扩大端口暴露范围。
+前置 CDN 若需要按真实客户端 IP 限流，可在 Compose 中将 `TRUSTED_PROXY_IPS` 设置为容器实际看到的隧道／代理对端地址（同机 Nginx 反向代理时就是 `127.0.0.1`，Cloudflare Tunnel 则是核实后的 Docker 网关 IP）。只有该代理能够访问应用入口、并确保传入的 `EO-Connecting-IP` ／ `CF-Connecting-IP` 由 CDN 提供时才应启用；不要信任任意来源或直接使用客户端提交的 `X-Forwarded-For`。保持回环端口绑定，不要为此扩大端口暴露范围。
 
 仅页面通过 HTTPS 访问时启用 `SECURE_COOKIES=true`。如果代理会改写 Host，务必设置 `PUBLIC_ORIGIN` 为浏览器实际访问的完整来源（协议、域名及必要端口，不带路径），否则写请求可能返回 403。
 

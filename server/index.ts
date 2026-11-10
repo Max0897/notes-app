@@ -34,10 +34,13 @@ const secureCookies = process.env.SECURE_COOKIES
 // 反向代理（Cloudflare Tunnel / Nginx）可能改写 Host，届时按 Host 比对会把正常的写操作
 // 误判成跨站请求。配了 PUBLIC_ORIGIN 就以它为唯一白名单，既更稳也更严格。
 const publicOrigin = (process.env.PUBLIC_ORIGIN ?? '').trim().replace(/\/+$/, '');
-// 仅当 TCP 对端在显式白名单内时，才接受 Cloudflare 的客户端 IP。
+// 仅当 TCP 对端在显式白名单内时，才接受代理传来的客户端 IP。
 const normalizeIp = (value: string) => value.toLowerCase().startsWith('::ffff:') && isIP(value.slice(7)) === 4 ? value.slice(7) : value.toLowerCase();
 const trustedProxyIps = new Set((process.env.TRUSTED_PROXY_IPS ?? '').split(',').map(value => normalizeIp(value.trim())).filter(Boolean));
 if ([...trustedProxyIps].some(value => !isIP(value))) throw new Error('TRUSTED_PROXY_IPS 必须是逗号分隔的代理 IP 地址');
+// 依次尝试的客户端 IP 请求头：腾讯 EdgeOne 用 EO-Connecting-IP，Cloudflare 用 CF-Connecting-IP。
+// 顺序即优先级，命中第一个合法的就返回。
+const CLIENT_IP_HEADERS = ['eo-connecting-ip', 'cf-connecting-ip'] as const;
 const COOKIE_NAME = secureCookies ? '__Host-notes_session' : 'notes_session';
 // 注册一律为邀请制：服务器上尚无账号时首个账号免邀请码，其余凭已注册满 24 小时用户的个人邀请码。
 // 另有「每日新增账号数」全站上限兜底。仅测试进程（NODE_ENV=test）可用 TEST_OPEN_REGISTRATION 跳过邀请码。
@@ -458,8 +461,12 @@ function rateLimited(key: string, maximum: number): number {
 }
 function clientIp(c: AppContext) {
   const peer = normalizeIp(getConnInfo(c).remote.address ?? 'unknown');
-  const forwarded = c.req.header('cf-connecting-ip')?.trim();
-  return trustedProxyIps.has(peer) && forwarded && isIP(forwarded) ? normalizeIp(forwarded) : peer;
+  if (!trustedProxyIps.has(peer)) return peer;
+  for (const name of CLIENT_IP_HEADERS) {
+    const forwarded = c.req.header(name)?.trim();
+    if (forwarded && isIP(forwarded)) return normalizeIp(forwarded);
+  }
+  return peer;
 }
 let passwordJobs = 0;
 const dummyPasswordHash = hash(randomBytes(32).toString('hex'), passwordOptions);
